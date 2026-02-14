@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "artifacts_schema/run_manifest_v0.json",
+  "title": "Cholla Colab Smoke Run Manifest v0",
+  "type": "object",
+  "required": [
+    "git_sha",
+    "build_command",
+    "binary_path",
+    "params_path",
+    "schedule_path",
+    "run_dir",
+    "produced_files",
+    "validation",
+    "error"
+  ],
+  "properties": {
+    "git_sha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "build_command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "binary_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "params_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schedule_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "produced_files": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": [
+        "status",
+        "details"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "details": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timestamp_utc": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "exit_code": {
+      "type": "integer"
+    },
+    "git_sha_short": {
+      "type": "string"
+    },
+    "input_hash_sha256": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "run_outdir": {
+      "type": "string"
+    },
+    "run_log": {
+      "type": "string"
+    },
+    "run_params": {
+      "type": "string"
+    },
+    "build_cmd": {
+      "type": "string"
+    },
+    "run_cmd": {
+      "type": "string"
+    },
+    "validator_passed": {
+      "type": "boolean"
+    },
+    "validator_details": {
+      "type": "string"
+    },
+    "validator_cmd": {
+      "type": "string"
+    },
+    "error_legacy": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
