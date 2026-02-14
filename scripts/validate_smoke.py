@@ -13,22 +13,14 @@ import sys
 # FIRST_SNAPSHOT_PATTERNS are intentionally strict so deleting the first output
 # file causes validation failure.
 FIRST_SNAPSHOT_PATTERNS = [
-    "**/0/0.h5.0",
-    "**/0/0.bin.0",
-    "**/0/0.txt.0",
+    "0/0.h5.0",
     "**/0.h5.0",
-    "**/0.bin.0",
-    "**/0.txt.0",
 ]
 
 # DATA_FILE_PATTERNS are broader and used to confirm there is at least one data
 # output file.
 DATA_FILE_PATTERNS = [
-    "**/*.h5",
     "**/*.h5.*",
-    "**/*.bin",
-    "**/*.bin.*",
-    "**/*.txt.*",
 ]
 
 EXCLUDED_BASENAMES = {

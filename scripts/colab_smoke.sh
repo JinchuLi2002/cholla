@@ -46,6 +46,67 @@ sha256_stream() {
   fi
 }
 
+
+            write_env_colab() {
+              local git_sha_full="unknown"
+              if git rev-parse HEAD >/dev/null 2>&1; then
+                git_sha_full="$(git rev-parse HEAD)"
+              fi
+
+              local nvidia_name="unknown"
+              local nvidia_driver="unknown"
+              local nvidia_cuda="unknown"
+              local nvidia_summary="nvidia-smi unavailable"
+
+              if command -v nvidia-smi >/dev/null 2>&1; then
+                local query
+                query="$(nvidia-smi --query-gpu=name,driver_version,cuda_version --format=csv,noheader 2>/dev/null | head -n 1 || true)"
+                if [[ -n "${query}" ]]; then
+                  IFS=',' read -r nvidia_name nvidia_driver nvidia_cuda <<<"${query}"
+                  nvidia_name="$(echo "${nvidia_name}" | xargs)"
+                  nvidia_driver="$(echo "${nvidia_driver}" | xargs)"
+                  nvidia_cuda="$(echo "${nvidia_cuda}" | xargs)"
+                  nvidia_summary="name=${nvidia_name};driver=${nvidia_driver};cuda=${nvidia_cuda}"
+                else
+                  nvidia_summary="$(nvidia-smi 2>/dev/null | sed -n '1,20p' | tr '
+' '; ' || true)"
+                fi
+              fi
+
+              local gcc_version
+              gcc_version="$(gcc --version 2>/dev/null | head -n 1 || echo "gcc unavailable")"
+
+              local os_release
+              if [[ -f /etc/os-release ]]; then
+                os_release="$(grep -E '^(PRETTY_NAME|NAME|VERSION)=' /etc/os-release | tr '
+' '; ' | sed 's/; $//')"
+              else
+                os_release="$(uname -a)"
+              fi
+
+              local cholla_machine_val="${CHOLLA_MACHINE:-github}"
+
+              GIT_SHA_FULL="${git_sha_full}"               NVIDIA_SUMMARY="${nvidia_summary}"               NVIDIA_NAME="${nvidia_name}"               NVIDIA_DRIVER="${nvidia_driver}"               NVIDIA_CUDA="${nvidia_cuda}"               GCC_VERSION_STR="${gcc_version}"               OS_RELEASE_STR="${os_release}"               CHOLLA_MACHINE_VAL="${cholla_machine_val}"               python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = {
+    "git_sha": os.environ.get("GIT_SHA_FULL", "unknown"),
+    "nvidia_smi_summary": os.environ.get("NVIDIA_SUMMARY", ""),
+    "gpu_name": os.environ.get("NVIDIA_NAME", "unknown"),
+    "driver_version": os.environ.get("NVIDIA_DRIVER", "unknown"),
+    "cuda_version": os.environ.get("NVIDIA_CUDA", "unknown"),
+    "gcc_version": os.environ.get("GCC_VERSION_STR", ""),
+    "os_release": os.environ.get("OS_RELEASE_STR", ""),
+    "cholla_machine": os.environ.get("CHOLLA_MACHINE_VAL", ""),
+}
+
+Path("artifacts").mkdir(parents=True, exist_ok=True)
+Path("artifacts/env_colab.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+PY
+            }
+
 write_manifest() {
   local code=$?
   EXIT_CODE="${code}"
@@ -213,6 +274,8 @@ run_validator() {
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_SHA_SHORT="$(git rev-parse --short=12 HEAD)"
 fi
+
+write_env_colab
 
 PARAMS_SRC="tests/smoke_cosmo/params.txt"
 SCALE_SRC="tests/smoke_cosmo/scale_outputs.txt"
