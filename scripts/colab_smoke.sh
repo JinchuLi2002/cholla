@@ -45,48 +45,69 @@ sha256_stream() {
     return 1
   fi
 }
+write_env_colab() {
+  local git_sha_full="unknown"
+  if git rev-parse HEAD >/dev/null 2>&1; then
+    git_sha_full="$(git rev-parse HEAD)"
+  fi
 
+  local nvidia_name="unknown"
+  local nvidia_driver="unknown"
+  local nvidia_cuda="unknown"
+  local nvidia_summary="nvidia-smi unavailable"
 
-            write_env_colab() {
-              local git_sha_full="unknown"
-              if git rev-parse HEAD >/dev/null 2>&1; then
-                git_sha_full="$(git rev-parse HEAD)"
-              fi
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    local nvidia_raw
+    nvidia_raw="$(nvidia-smi 2>/dev/null || true)"
+    if [[ -n "${nvidia_raw}" ]]; then
+      nvidia_summary="$(printf "%s" "${nvidia_raw}" | sed -n '1,20p' | tr '\n' '; ' | sed 's/; $//')"
+    fi
 
-              local nvidia_name="unknown"
-              local nvidia_driver="unknown"
-              local nvidia_cuda="unknown"
-              local nvidia_summary="nvidia-smi unavailable"
+    # `cuda_version` is not available in all nvidia-smi query versions.
+    local query
+    query="$(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null | head -n 1 || true)"
+    if [[ -n "${query}" ]]; then
+      IFS=',' read -r nvidia_name nvidia_driver <<<"${query}"
+      nvidia_name="$(echo "${nvidia_name}" | xargs)"
+      nvidia_driver="$(echo "${nvidia_driver}" | xargs)"
+    fi
 
-              if command -v nvidia-smi >/dev/null 2>&1; then
-                local query
-                query="$(nvidia-smi --query-gpu=name,driver_version,cuda_version --format=csv,noheader 2>/dev/null | head -n 1 || true)"
-                if [[ -n "${query}" ]]; then
-                  IFS=',' read -r nvidia_name nvidia_driver nvidia_cuda <<<"${query}"
-                  nvidia_name="$(echo "${nvidia_name}" | xargs)"
-                  nvidia_driver="$(echo "${nvidia_driver}" | xargs)"
-                  nvidia_cuda="$(echo "${nvidia_cuda}" | xargs)"
-                  nvidia_summary="name=${nvidia_name};driver=${nvidia_driver};cuda=${nvidia_cuda}"
-                else
-                  nvidia_summary="$(nvidia-smi 2>/dev/null | sed -n '1,20p' | tr '
-' '; ' || true)"
-                fi
-              fi
+    local cuda_from_header
+    cuda_from_header="$(printf "%s\n" "${nvidia_raw}" | sed -n 's/.*CUDA Version: \([^ ]*\).*/\1/p' | head -n 1)"
+    if [[ -n "${cuda_from_header}" ]]; then
+      nvidia_cuda="${cuda_from_header}"
+    fi
+  fi
 
-              local gcc_version
-              gcc_version="$(gcc --version 2>/dev/null | head -n 1 || echo "gcc unavailable")"
+  if [[ "${nvidia_cuda}" == "unknown" ]] && command -v nvcc >/dev/null 2>&1; then
+    local nvcc_cuda
+    nvcc_cuda="$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9.]*\),.*/\1/p' | head -n 1 || true)"
+    if [[ -n "${nvcc_cuda}" ]]; then
+      nvidia_cuda="${nvcc_cuda}"
+    fi
+  fi
 
-              local os_release
-              if [[ -f /etc/os-release ]]; then
-                os_release="$(grep -E '^(PRETTY_NAME|NAME|VERSION)=' /etc/os-release | tr '
-' '; ' | sed 's/; $//')"
-              else
-                os_release="$(uname -a)"
-              fi
+  local gcc_version
+  gcc_version="$(gcc --version 2>/dev/null | head -n 1 || echo "gcc unavailable")"
 
-              local cholla_machine_val="${CHOLLA_MACHINE:-github}"
+  local os_release
+  if [[ -f /etc/os-release ]]; then
+    os_release="$(grep -E '^(PRETTY_NAME|NAME|VERSION)=' /etc/os-release | tr '\n' '; ' | sed 's/; $//')"
+  else
+    os_release="$(uname -a)"
+  fi
 
-              GIT_SHA_FULL="${git_sha_full}"               NVIDIA_SUMMARY="${nvidia_summary}"               NVIDIA_NAME="${nvidia_name}"               NVIDIA_DRIVER="${nvidia_driver}"               NVIDIA_CUDA="${nvidia_cuda}"               GCC_VERSION_STR="${gcc_version}"               OS_RELEASE_STR="${os_release}"               CHOLLA_MACHINE_VAL="${cholla_machine_val}"               python3 - <<'PY'
+  local cholla_machine_val="${CHOLLA_MACHINE:-github}"
+
+  GIT_SHA_FULL="${git_sha_full}" \
+  NVIDIA_SUMMARY="${nvidia_summary}" \
+  NVIDIA_NAME="${nvidia_name}" \
+  NVIDIA_DRIVER="${nvidia_driver}" \
+  NVIDIA_CUDA="${nvidia_cuda}" \
+  GCC_VERSION_STR="${gcc_version}" \
+  OS_RELEASE_STR="${os_release}" \
+  CHOLLA_MACHINE_VAL="${cholla_machine_val}" \
+  python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -105,7 +126,7 @@ payload = {
 Path("artifacts").mkdir(parents=True, exist_ok=True)
 Path("artifacts/env_colab.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 PY
-            }
+}
 
 write_manifest() {
   local code=$?
