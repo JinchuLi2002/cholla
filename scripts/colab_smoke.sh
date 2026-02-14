@@ -22,6 +22,13 @@ RUN_OUTDIR=""
 RUN_LOG=""
 RUN_PARAMS=""
 SCHEDULE_PATH=""
+PARAMS_SOURCE_PATH=""
+SCHEDULE_SOURCE_PATH=""
+RUN_INPUT_PARAMS=""
+RUN_INPUT_SCHEDULE=""
+OUT_ROOT_USED=""
+RUN_PRESET="smoke_cosmo"
+RUN_ID_OVERRIDE=""
 GIT_SHA_SHORT="unknown"
 INPUT_HASH="unknown"
 
@@ -44,6 +51,80 @@ sha256_stream() {
     echo "no_sha256_tool"
     return 1
   fi
+}
+
+sed_escape_replacement() {
+  printf "%s" "$1" | sed -e 's/[&|]/\\&/g'
+}
+
+usage() {
+  cat <<'EOF'
+Usage: bash scripts/colab_smoke.sh [--params PATH] [--schedule PATH] [--out-root PATH] [--run-id RUN_ID]
+
+Options:
+  --params PATH     Parameter template file (default: tests/smoke_cosmo/params.txt)
+  --schedule PATH   scale_outputs file (default: tests/smoke_cosmo/scale_outputs.txt)
+  --out-root PATH   Root directory for run outputs (default: runs/smoke_cosmo)
+  --run-id RUN_ID   Explicit run id. If omitted, run id is computed from effective inputs.
+  -h, --help        Show this help text.
+EOF
+}
+
+parse_args() {
+  EFFECTIVE_PARAMS="tests/smoke_cosmo/params.txt"
+  EFFECTIVE_SCHEDULE="tests/smoke_cosmo/scale_outputs.txt"
+  OUT_ROOT_USED="runs/smoke_cosmo"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --params)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --params" >&2
+          usage >&2
+          exit 2
+        fi
+        EFFECTIVE_PARAMS="$2"
+        shift 2
+        ;;
+      --schedule)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --schedule" >&2
+          usage >&2
+          exit 2
+        fi
+        EFFECTIVE_SCHEDULE="$2"
+        shift 2
+        ;;
+      --out-root)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --out-root" >&2
+          usage >&2
+          exit 2
+        fi
+        OUT_ROOT_USED="$2"
+        shift 2
+        ;;
+      --run-id)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --run-id" >&2
+          usage >&2
+          exit 2
+        fi
+        RUN_ID_OVERRIDE="$2"
+        shift 2
+        ;;
+      -h|--help)
+        trap - EXIT
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown argument: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+  done
 }
 write_env_colab() {
   local git_sha_full="unknown"
@@ -173,6 +254,11 @@ write_manifest() {
   RUN_LOG="${RUN_LOG}" \
   RUN_PARAMS="${RUN_PARAMS}" \
   SCHEDULE_PATH="${SCHEDULE_PATH}" \
+  PARAMS_SOURCE_PATH="${PARAMS_SOURCE_PATH}" \
+  SCHEDULE_SOURCE_PATH="${SCHEDULE_SOURCE_PATH}" \
+  RUN_INPUT_PARAMS="${RUN_INPUT_PARAMS}" \
+  RUN_INPUT_SCHEDULE="${RUN_INPUT_SCHEDULE}" \
+  OUT_ROOT_USED="${OUT_ROOT_USED}" \
   BINARY_PATH="${BINARY_PATH}" \
   BUILD_CMD_USED="${BUILD_CMD_USED}" \
   RUN_CMD_USED="${RUN_CMD_USED}" \
@@ -219,6 +305,16 @@ manifest = {
     "run_outdir": os.environ["RUN_OUTDIR"],
     "run_log": os.environ["RUN_LOG"],
     "run_params": os.environ["RUN_PARAMS"],
+    # Canonical provenance keys for effective input source locations.
+    "source_params_path": os.environ["PARAMS_SOURCE_PATH"],
+    "source_schedule_path": os.environ["SCHEDULE_SOURCE_PATH"],
+    # Deprecated legacy aliases; keep for backward compatibility while
+    # downstream readers migrate to source_* keys.
+    "params_source_path": os.environ["PARAMS_SOURCE_PATH"],
+    "schedule_source_path": os.environ["SCHEDULE_SOURCE_PATH"],
+    "input_params_copy": os.environ["RUN_INPUT_PARAMS"],
+    "input_schedule_copy": os.environ["RUN_INPUT_SCHEDULE"],
+    "out_root": os.environ["OUT_ROOT_USED"],
     "build_cmd": os.environ["BUILD_CMD_USED"],
     "run_cmd": os.environ["RUN_CMD_USED"],
     "validator_passed": os.environ["VALIDATOR_PASSED"].lower() == "true",
@@ -296,37 +392,77 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_SHA_SHORT="$(git rev-parse --short=12 HEAD)"
 fi
 
+parse_args "$@"
+
 write_env_colab
 
-PARAMS_SRC="tests/smoke_cosmo/params.txt"
-SCALE_SRC="tests/smoke_cosmo/scale_outputs.txt"
-SCHEDULE_PATH="${SCALE_SRC}"
+PARAMS_SOURCE_PATH="${EFFECTIVE_PARAMS}"
+SCHEDULE_SOURCE_PATH="${EFFECTIVE_SCHEDULE}"
 
-if [[ ! -f "${PARAMS_SRC}" ]]; then
-  echo "Missing ${PARAMS_SRC}" >&2
-  exit 2
-fi
-if [[ ! -f "${SCALE_SRC}" ]]; then
-  echo "Missing ${SCALE_SRC}" >&2
+if [[ -z "${OUT_ROOT_USED}" ]]; then
+  echo "Invalid --out-root (empty value)" >&2
   exit 2
 fi
 
-INPUT_HASH="$(cat "${PARAMS_SRC}" "${SCALE_SRC}" | sha256_stream)"
-RUN_ID="${GIT_SHA_SHORT}_${INPUT_HASH:0:16}"
-RUN_DIR="runs/smoke_cosmo/${RUN_ID}"
+if [[ ! -f "${PARAMS_SOURCE_PATH}" ]]; then
+  echo "Missing ${PARAMS_SOURCE_PATH}" >&2
+  exit 2
+fi
+if [[ ! -f "${SCHEDULE_SOURCE_PATH}" ]]; then
+  echo "Missing ${SCHEDULE_SOURCE_PATH}" >&2
+  exit 2
+fi
+
+INPUT_HASH="$(cat "${PARAMS_SOURCE_PATH}" "${SCHEDULE_SOURCE_PATH}" | sha256_stream)"
+if [[ -n "${RUN_ID_OVERRIDE}" ]]; then
+  RUN_ID="${RUN_ID_OVERRIDE}"
+else
+  RUN_ID="${GIT_SHA_SHORT}_${RUN_PRESET}_${INPUT_HASH:0:16}"
+fi
+
+RUN_DIR="${OUT_ROOT_USED%/}/${RUN_ID}"
 RUN_OUTDIR="${RUN_DIR}"
 RUN_LOG="${RUN_DIR}/run.log"
+RUN_INPUT_PARAMS="${RUN_DIR}/inputs/params.txt"
+RUN_INPUT_SCHEDULE="${RUN_DIR}/inputs/scale_outputs.txt"
 RUN_PARAMS="${RUN_DIR}/params.run.txt"
+SCHEDULE_PATH="${RUN_INPUT_SCHEDULE}"
 
-mkdir -p "${RUN_DIR}"
-cp "${PARAMS_SRC}" "${RUN_DIR}/params.txt"
-cp "${SCALE_SRC}" "${RUN_DIR}/scale_outputs.txt"
+mkdir -p "${RUN_DIR}/inputs"
+cp "${PARAMS_SOURCE_PATH}" "${RUN_INPUT_PARAMS}"
+cp "${SCHEDULE_SOURCE_PATH}" "${RUN_INPUT_SCHEDULE}"
 cp tests/smoke_cosmo/README.md "${RUN_DIR}/README.snapshot.txt"
 
-cp "${PARAMS_SRC}" "${RUN_PARAMS}"
-sed -i.bak "s|RUN_OUTDIR|./${RUN_OUTDIR}/|g" "${RUN_PARAMS}"
-sed -i.bak "s|__RUN_ID__|${RUN_ID}|g" "${RUN_PARAMS}"
+cp "${RUN_INPUT_PARAMS}" "${RUN_PARAMS}"
+RUN_OUTDIR_PARAM="${RUN_OUTDIR}"
+if [[ "${RUN_OUTDIR_PARAM}" != /* ]]; then
+  RUN_OUTDIR_PARAM="./${RUN_OUTDIR_PARAM}"
+fi
+RUN_OUTDIR_PARAM="${RUN_OUTDIR_PARAM%/}/"
+
+RUN_OUTDIR_ESCAPED="$(sed_escape_replacement "${RUN_OUTDIR_PARAM}")"
+RUN_ID_ESCAPED="$(sed_escape_replacement "${RUN_ID}")"
+RUN_INPUT_SCHEDULE_ESCAPED="$(sed_escape_replacement "${RUN_INPUT_SCHEDULE}")"
+
+sed -i.bak "s|RUN_OUTDIR|${RUN_OUTDIR_ESCAPED}|g" "${RUN_PARAMS}"
+sed -i.bak "s|__RUN_ID__|${RUN_ID_ESCAPED}|g" "${RUN_PARAMS}"
+
+if grep -q '^[[:space:]]*outdir=' "${RUN_PARAMS}"; then
+  sed -i.bak "s|^[[:space:]]*outdir=.*$|outdir=${RUN_OUTDIR_ESCAPED}|g" "${RUN_PARAMS}"
+else
+  printf "\noutdir=%s\n" "${RUN_OUTDIR_PARAM}" >> "${RUN_PARAMS}"
+fi
+
+if grep -q '^[[:space:]]*scale_outputs_file=' "${RUN_PARAMS}"; then
+  sed -i.bak "s|^[[:space:]]*scale_outputs_file=.*$|scale_outputs_file=${RUN_INPUT_SCHEDULE_ESCAPED}|g" "${RUN_PARAMS}"
+else
+  printf "\nscale_outputs_file=%s\n" "${RUN_INPUT_SCHEDULE}" >> "${RUN_PARAMS}"
+fi
+
 rm -f "${RUN_PARAMS}.bak"
+
+echo "RUN_ID=${RUN_ID}"
+echo "RUN_DIR=${RUN_DIR}"
 
 EXPECTED_BIN="bin/cholla.cosmology.github"
 if [[ -x "${EXPECTED_BIN}" ]]; then

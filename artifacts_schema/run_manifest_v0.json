@@ -99,6 +99,31 @@
     "run_params": {
       "type": "string"
     },
+    "source_params_path": {
+      "type": "string",
+      "description": "Canonical original params input path used for this run."
+    },
+    "source_schedule_path": {
+      "type": "string",
+      "description": "Canonical original schedule input path used for this run."
+    },
+    "params_source_path": {
+      "type": "string",
+      "description": "Deprecated legacy alias for source_params_path."
+    },
+    "schedule_source_path": {
+      "type": "string",
+      "description": "Deprecated legacy alias for source_schedule_path."
+    },
+    "input_params_copy": {
+      "type": "string"
+    },
+    "input_schedule_copy": {
+      "type": "string"
+    },
+    "out_root": {
+      "type": "string"
+    },
     "build_cmd": {
       "type": "string"
     },
