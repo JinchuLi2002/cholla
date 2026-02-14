@@ -69,7 +69,7 @@ void Check_Configuration(Parameters const& P)
   Check_Boundary(P.zu_bcnd, "zu_bcnd");
 
   // warn if error checking is disabled
-#ifndef DISABLE_GPU_ERROR_CHECKING
+#ifdef DISABLE_GPU_ERROR_CHECKING
   // NOLINTNEXTLINE(clang-diagnostic-#warnings)
   #warning "CUDA error checking is disabled. Enable it by compiling without the DISABLE_GPU_ERROR_CHECKING macro."
 #endif  //! DISABLE_GPU_ERROR_CHECKING
@@ -96,8 +96,8 @@ void Check_Configuration(Parameters const& P)
   #endif  //! HLLD or EXACT or ROE or HLL or HLLC
 
   // May only use certain reconstructions
-  #if ((defined(PCM) + defined(PLMC) + defined(PPMC)) != 1) || defined(PLMP) || defined(PPMP)
-    #error "MHD only supports PCM, PLMC, and PPMC reconstruction"
+  #if ((defined(PCM) + defined(PLMP) + defined(PLMC) + defined(PPMC)) != 1) || defined(PPMP)
+    #error "MHD does not support PPMP reconstruction."
   #endif  // Reconstruction check
 
   // must have HDF5

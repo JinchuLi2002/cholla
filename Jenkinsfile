@@ -39,8 +39,25 @@ pipeline
                     {
                         steps
                         {
-                            sh  '''
-                                git submodule update --init --recursive
+                            sh  '''#!/bin/bash -le
+                                # enable tracing mode now that the shell
+                                # configuration has been read
+                                set -x
+
+                                if [ "${CHOLLA_MAKE_TYPE}" = "cosmology" ] ||
+                                   [ "${CHOLLA_MAKE_TYPE}" = "mhd" ] ||
+                                   [ "${CHOLLA_MAKE_TYPE}" = "hydro" ] ||
+                                   [ "${CHOLLA_MAKE_TYPE}" = "gravity" ]; then
+                                    ./tools/ci-setup-submodule.py \
+                                       --color \
+                                       --fallback-manual-lfs-download
+                                else
+                                    # we skip the download because it's not currently
+                                    # necessary & we want to minimize calls to
+                                    # downloads from GitHub's raw-urls (when git-lfs
+                                    # commonly fails)
+                                    echo "hard-coded to skip submodule download"
+                                fi
                                 make clobber
                                 '''
                         }
@@ -49,7 +66,11 @@ pipeline
                     {
                         steps
                         {
-                            sh  '''
+                            sh  '''#!/bin/bash -le
+                                # enable tracing mode now that the shell
+                                # configuration has been read
+                                set -x
+
                                 source builds/run_tests.sh
                                 setupTests -c gcc -t ${CHOLLA_MAKE_TYPE}
 
@@ -61,7 +82,11 @@ pipeline
                     {
                         steps
                         {
-                            sh  '''
+                            sh  '''#!/bin/bash -le
+                                # enable tracing mode now that the shell
+                                # configuration has been read
+                                set -x
+
                                 source builds/run_tests.sh
                                 setupTests -c gcc -t ${CHOLLA_MAKE_TYPE}
 
@@ -73,12 +98,19 @@ pipeline
                     {
                         steps
                         {
-                            sh  '''
-                                source builds/run_tests.sh
-                                setupTests -c gcc -t ${CHOLLA_MAKE_TYPE}
+                            retry(2)
+                            {
+                                sh  '''#!/bin/bash -le
+                                    # enable tracing mode now that the shell
+                                    # configuration has been read
+                                    set -x
 
-                                runTests
-                                '''
+                                    source builds/run_tests.sh
+                                    setupTests -c gcc -t ${CHOLLA_MAKE_TYPE}
+
+                                    runTests
+                                    '''
+                            }
                         }
                     }
                     stage('Run Clang Tidy')
@@ -86,7 +118,11 @@ pipeline
                         steps
                         {
                             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                                sh  '''
+                                sh  '''#!/bin/bash -le
+                                    # enable tracing mode now that the shell
+                                    # configuration has been read
+                                    set -x
+
                                     source builds/run_tests.sh
                                     setupTests -c gcc -t ${CHOLLA_MAKE_TYPE}
 
@@ -102,15 +138,19 @@ pipeline
                         {
                             // Print the clang-tidy results with bars of equal
                             // signs seperating each file
-                            sh  '''
+                            sh  '''#!/bin/bash -le
+                                # we explicitly choose not to use tracing mode
+
+                                echo "tidy_results_cpp_${CHOLLA_MAKE_TYPE}.log"
                                 printf '=%.0s' {1..100}
                                 printf "\n"
                                 cat tidy_results_cpp_${CHOLLA_MAKE_TYPE}.log
+                                printf "\n\n"
+
+                                echo "tidy_results_gpu_${CHOLLA_MAKE_TYPE}.log"
                                 printf '=%.0s' {1..100}
                                 printf "\n"
                                 cat tidy_results_gpu_${CHOLLA_MAKE_TYPE}.log
-                                printf '=%.0s' {1..100}
-                                printf "\n"
                                 '''
                         }
                     }

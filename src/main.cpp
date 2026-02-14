@@ -11,18 +11,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cooling/chemistry.h"
 #include "global/global.h"
 #include "grid/grid3D.h"
+#include "io/ParameterMap.h"
+#include "io/WriterManager.h"
 #include "io/io.h"
 #include "utils/cuda_utilities.h"
 #include "utils/error_handling.h"
-
-#ifdef SUPERNOVA
-  #include "particles/supernova.h"
+#ifdef FEEDBACK
+  #include "feedback/feedback.h"
   #ifdef ANALYSIS
     #include "analysis/feedback_analysis.h"
   #endif
-#endif  // SUPERNOVA
+#endif  // FEEDBACK
 #ifdef STAR_FORMATION
   #include "particles/star_formation.h"
 #endif
@@ -76,8 +78,11 @@ int main(int argc, char *argv[])
   // create the grid
   Grid3D G;
 
-  // read in the parameters
-  Parse_Params(param_file, &P, argc, argv);
+  // read in contents from the parameter file
+  ParameterMap pmap(param_file, argc, argv);
+
+  // use this parameter information to populate the Parameter object
+  Parse_Params(pmap, &P);
   // and output to screen
   chprintf("Git Commit Hash = %s\n", GIT_HASH);
   chprintf("Macro Flags     = %s\n", MACRO_FLAGS);
@@ -94,10 +99,14 @@ int main(int argc, char *argv[])
     is_restart = true;
   }
 
+  // Create the Writer Manager, which is in charge of calling of trigger the various
+  // functions that dump data (e.g. snapshots, slices, projections)
+  io::WriterManager writer_manager(P, pmap);
+
   if (is_restart) {
     chprintf("Input directory:  %s\n", P.indir);
   }
-  chprintf("Output directory:  %s\n", P.outdir);
+  chprintf("Output directory:  %s\n", writer_manager.fname_template().nominal_output_dir_path().c_str());
 
   // Check the configuration
   Check_Configuration(P);
@@ -149,6 +158,10 @@ int main(int argc, char *argv[])
   G.Initialize_Cosmology(&P);
 #endif
 
+  // in the future, we plan to consolidate COOLING_GRACKLE and CHEMISTRY_GPU
+  // within chemistry_callback
+  std::function<void(Grid3D &)> chemistry_callback = configure_chemistry_callback(pmap);
+
 #ifdef COOLING_GRACKLE
   G.Initialize_Grackle(&P);
 #endif
@@ -164,14 +177,15 @@ int main(int argc, char *argv[])
   }
 #endif
 
-#if defined(SUPERNOVA) && defined(PARTICLE_AGE)
-  FeedbackAnalysis sn_analysis(G);
-  #ifdef MPI_CHOLLA
-  supernova::initState(&P, G.Particles.n_total_initial);
-  #else
-  supernova::initState(&P, G.Particles.n_local);
-  #endif  // MPI_CHOLLA
-#endif    // SUPERNOVA && PARTICLE_AGE
+#if defined(FEEDBACK) && defined(PARTICLE_AGE)
+  FeedbackAnalysis sn_analysis(G, &P);
+  #ifndef NO_SN_FEEDBACK
+  feedback::Init_State(&P);
+  #endif  // NO_SN_FEEDBACK
+  #ifndef NO_WIND_FEEDBACK
+  feedback::Init_Wind_State(&P);
+  #endif
+#endif  // FEEDBACK && PARTICLE_AGE
 
 #ifdef STAR_FORMATION
   star_formation::Initialize(G);
@@ -180,6 +194,11 @@ int main(int argc, char *argv[])
 #ifdef GRAVITY_ANALYTIC_COMP
   G.Setup_Analytic_Potential(&P);
 #endif
+
+  // now that we are done with initializing various modules, let's check for unused parameters
+  Warn_Unused_Params(pmap);
+
+  // do work in anticipation of the first timestep
 
 #ifdef GRAVITY
   // Get the gravitational potential for the first timestep
@@ -209,7 +228,7 @@ int main(int argc, char *argv[])
   if (!is_restart || G.H.Output_Now) {
     // write the initial conditions to file
     chprintf("Writing initial conditions to file...\n");
-    Write_Data(G, P, nfile);
+    Write_Data(G, P, nfile, writer_manager);
   }
   // add one to the output file count
   nfile++;
@@ -260,9 +279,9 @@ int main(int argc, char *argv[])
       G.H.dt = next_scheduled_time - G.H.t;
     }
 
-#if defined(SUPERNOVA) && defined(PARTICLE_AGE)
-    supernova::Cluster_Feedback(G, sn_analysis);
-#endif  // SUPERNOVA && PARTICLE_AGE
+#if defined(FEEDBACK) && defined(PARTICLE_AGE)
+    feedback::Cluster_Feedback(G, sn_analysis);
+#endif  // FEEDBACK && PARTICLE_AGE
 
 #ifdef PARTICLES
     // Advance the particles KDK( first step ): Velocities are updated by 0.5*dt
@@ -273,7 +292,7 @@ int main(int argc, char *argv[])
 #endif
 
     // Advance the grid by one timestep
-    dti = G.Update_Hydro_Grid();
+    dti = G.Update_Hydro_Grid(chemistry_callback);
 
     // update the simulation time ( t += dt )
     G.Update_Time();
@@ -327,10 +346,8 @@ int main(int argc, char *argv[])
     if (P.output_always) G.H.Output_Now = true;
 
 #ifdef ANALYSIS
-    if (G.Analysis.Output_Now) {
-      G.Compute_and_Output_Analysis(&P);
-    }
-  #if defined(SUPERNOVA) && defined(PARTICLE_AGE)
+    if (G.Analysis.Output_Now) G.Compute_and_Output_Analysis(&P);
+  #if defined(FEEDBACK) && defined(PARTICLE_AGE)
     sn_analysis.Compute_Gas_Velocity_Dispersion(G);
   #endif
 #endif
@@ -341,7 +358,7 @@ int main(int argc, char *argv[])
     if (G.H.t == outtime || G.H.Output_Now) {
 #ifdef OUTPUT
       /*output the grid data*/
-      Write_Data(G, P, nfile);
+      Write_Data(G, P, nfile, writer_manager);
       // add one to the output file count
       nfile++;
 #endif  // OUTPUT
@@ -354,15 +371,13 @@ int main(int argc, char *argv[])
     G.Timer.n_steps += 1;
 #endif
 
-#ifdef N_STEPS_LIMIT
     // Exit the loop when reached the limit number of steps (optional)
-    if (G.H.n_step == N_STEPS_LIMIT) {
-  #ifdef OUTPUT
-      Write_Data(G, P, nfile);
-  #endif  // OUTPUT
+    if (G.H.n_step >= P.n_steps_limit and P.n_steps_limit > 0) {
+#ifdef OUTPUT
+      Write_Data(G, P, nfile, writer_manager);
+#endif  // OUTPUT
       break;
     }
-#endif
 
 #ifdef COSMOLOGY
     // Exit the loop when reached the last scale_factor output

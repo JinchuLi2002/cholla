@@ -10,8 +10,11 @@
 
 #include <stdio.h>
 
+#include <functional>
+
 #include "../global/global.h"
 #include "../global/global_cuda.h"
+#include "../io/FnameTemplate.h"
 
 #ifdef HDF5
   #include <hdf5.h>
@@ -210,9 +213,10 @@ struct Header {
    *  \brief Length of the current timestep */
   Real dt;
 
-#ifdef AVERAGE_SLOW_CELLS
+  /*! \brief Cells that introduce timesteps shorter than will be averaged with
+   *         neighboring cells. Should be a negative value when the
+   *         AVERAGE_SLOW_CELLS macro isn't defined. */
   Real min_dt_slow;
-#endif
 
   /*! \var t_wall
    *  \brief Wall time */
@@ -326,14 +330,6 @@ class Grid3D
   AnalysisModule Analysis;
 #endif
 
-#ifdef SUPERNOVA  // TODO refactor this into Analysis module
-  Real countSN;
-  Real countResolved;
-  Real countUnresolved;
-  Real totalEnergy;
-  Real totalMomentum;
-  Real totalUnresEnergy;
-#endif
   struct Conserved {
     /*! pointer to conserved variable array on the host */
     Real *host;
@@ -448,7 +444,7 @@ class Grid3D
 
   /*! \fn void Get_Position(long i, long j, long k, Real *xpos, Real *ypos, Real
    * *zpos) \brief Get the cell-centered position based on cell index */
-  void Get_Position(long i, long j, long k, Real *xpos, Real *ypos, Real *zpos);
+  void Get_Position(long i, long j, long k, Real *xpos, Real *ypos, Real *zpos) const;
 
   Real Calc_Inverse_Timestep();
 
@@ -471,8 +467,13 @@ class Grid3D
   void Execute_Hydro_Integrator(void);
 
   /*! \fn void Update_Hydro_Grid(void)
-   *  \brief Do all steps to update the hydro. */
-  Real Update_Hydro_Grid(void);
+   *  \brief Do all steps to update the hydro.
+   *
+   *  \param chemistry_callback is a crude way to optionally provide a cooling
+   *  function that is invoked after the hydro-integrator. At the moment,
+   *  this does not support chemistry.
+   */
+  Real Update_Hydro_Grid(std::function<void(Grid3D &)> &chemistry_callback);
 
   void Update_Time();
   /*! \fn void Write_Header_Text(FILE *fp)
@@ -536,6 +537,12 @@ class Grid3D
   /*! \fn void Read_Grid_HDF5(hid_t file_id)
    *  \brief Read in grid data from an hdf5 file. */
   void Read_Grid_HDF5(hid_t file_id, struct Parameters P);
+#endif
+
+#if defined(PRINT_INITIAL_STATS) && defined(COSMOLOGY)
+  /*! \fn void Print_Grid_Stats(void)
+   *  \brief Compute stats for grid properties. */
+  void Print_Grid_Stats(void);
 #endif
 
   /*! \fn void Reset(void)
@@ -687,6 +694,8 @@ class Grid3D
 
   void Zeldovich_Pancake(struct Parameters P);
 
+  void Adiabatic_Expansion(struct Parameters P);
+
   void Chemistry_Test(struct Parameters P);
 
 #ifdef MHD
@@ -778,7 +787,7 @@ class Grid3D
   void Add_Analytic_Potential();
   void Add_Analytic_Potential(int g_start, int g_end);
   void Setup_Analytic_Potential(struct Parameters *P);
-  void Setup_Analytic_Galaxy_Potential(int g_start, int g_end, DiskGalaxy &gal);
+  void Setup_Analytic_Galaxy_Potential(int g_start, int g_end, const DiskGalaxy &gal);
   #ifdef GRAVITY_GPU
   void Add_Analytic_Potential_GPU();
   #endif
@@ -821,8 +830,8 @@ class Grid3D
   void Transfer_Particles_Density_Boundaries(struct Parameters P);
   void Copy_Particles_Density_Buffer_Device_to_Host(int direction, int side, Real *buffer_d, Real *buffer_h);
   // void Transfer_Particles_Boundaries( struct Parameters P );
-  void WriteData_Particles(struct Parameters P, int nfile);
-  void OutputData_Particles(struct Parameters P, int nfile);
+  void WriteData_Particles(struct Parameters P, int nfile, const FnameTemplate &fname_template);
+  void OutputData_Particles(struct Parameters P, int nfile, const FnameTemplate &fname_template);
   void Load_Particles_Data(struct Parameters P);
   #ifdef HDF5
   void Write_Particles_Header_HDF5(hid_t file_id);
@@ -847,13 +856,13 @@ class Grid3D
   void Advance_Particles_KDK_Step2_GPU();
   void Set_Particles_Boundary_GPU(int dir, int side);
   void Set_Particles_Density_Boundaries_Periodic_GPU(int direction, int side);
+  int Load_Particles_Density_Boundary_to_Buffer_GPU(int direction, int side, Real *buffer);
+  void Unload_Particles_Density_Boundary_From_Buffer_GPU(int direction, int side, Real *buffer);
   #endif  // PARTICLES_GPU
   #ifdef GRAVITY_GPU
   void Copy_Potential_From_GPU();
   void Copy_Particles_Density_to_GPU();
   void Copy_Particles_Density_GPU();
-  int Load_Particles_Density_Boundary_to_Buffer_GPU(int direction, int side, Real *buffer);
-  void Unload_Particles_Density_Boundary_From_Buffer_GPU(int direction, int side, Real *buffer);
   #endif  // GRAVITY_GPU
 #endif    // PARTICLES
 
@@ -862,7 +871,7 @@ class Grid3D
   void Change_DM_Frame_System(bool forward);
   void Change_GAS_Frame_System(bool forward);
   void Change_GAS_Frame_System_GPU(bool forward);
-  void Change_Cosmological_Frame_Sytem(bool forward);
+  void Change_Cosmological_Frame_System(bool forward);
   void Advance_Particles_KDK_Cosmo_Step1_function(part_int_t p_start, part_int_t p_end);
   void Advance_Particles_KDK_Cosmo_Step2_function(part_int_t p_start, part_int_t p_end);
   Real Calc_Particles_dt_Cosmo_function(part_int_t p_start, part_int_t p_end);

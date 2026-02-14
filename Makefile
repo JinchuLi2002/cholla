@@ -9,16 +9,10 @@ include builds/make.type.$(TYPE)
 # CUDA_ARCH defaults to sm_70 if not set in make.host
 CUDA_ARCH ?= sm_70
 
-DIRS     := src src/analysis src/chemistry_gpu src/cooling src/cooling_grackle src/cosmology \
-            src/cpu src/global src/gravity src/gravity/paris src/grid src/hydro \
-            src/integrators src/io src/main.cpp src/main_tests.cpp src/mhd\
-            src/model src/mpi src/old_cholla src/particles src/reconstruction \
-            src/riemann_solvers src/system_tests src/utils src/dust
-
 SUFFIX ?= .$(TYPE).$(MACHINE)
 
-CPPFILES := $(foreach DIR,$(DIRS),$(wildcard $(DIR)/*.cpp))
-GPUFILES := $(foreach DIR,$(DIRS),$(wildcard $(DIR)/*.cu))
+CPPFILES := $(shell find src/ -type f -name '*.cpp')
+GPUFILES := $(shell find src/ -type f -name '*.cu')
 
 # Build a list of all potential object files so cleaning works properly
 CLEAN_OBJS := $(subst .cpp,.o,$(CPPFILES)) \
@@ -91,8 +85,16 @@ ifeq ($(findstring -DPARIS,$(DFLAGS)),-DPARIS)
     CXXFLAGS += -I$(ROCM_PATH)/include/hipfft -I$(ROCM_PATH)/hipfft/include
     GPUFLAGS += -I$(ROCM_PATH)/include/hipfft -I$(ROCM_PATH)/hipfft/include
     LIBS += -L$(ROCM_PATH)/hipfft/lib -lhipfft
-  else
-    LIBS += -lcufft
+  else 
+    ifdef NVIDIAMATH_ROOT
+      # on a subset of CUDA platform, the NVIDIA MATH libraries are handled
+      # separately from the rest of the core CUDA runtime libraries
+      CXXFLAGS += -I$(NVIDIAMATH_ROOT)/include
+      GPUFLAGS += -I$(NVIDIAMATH_ROOT)/include
+      LIBS += -L$(NVIDIAMATH_ROOT)/lib64 -lcufft
+    else
+      LIBS += -lcufft
+    endif
   endif
   ifeq ($(findstring -DGRAVITY_5_POINTS_GRADIENT,$(DFLAGS)),-DGRAVITY_5_POINTS_GRADIENT)
     DFLAGS += -DPARIS_5PT
@@ -101,7 +103,7 @@ ifeq ($(findstring -DPARIS,$(DFLAGS)),-DPARIS)
   endif
 endif
 
-ifeq ($(findstring -DSUPERNOVA,$(DFLAGS)),-DSUPERNOVA)
+ifeq ($(findstring -DFEEDBACK,$(DFLAGS)),-DFEEDBACK)
     ifdef HIPCONFIG
 	CXXFLAGS += -I$(ROCM_PATH)/include/hiprand -I$(ROCM_PATH)/hiprand/include
 	GPUFLAGS += -I$(ROCM_PATH)/include/hiprand -I$(ROCM_PATH)/hiprand/include

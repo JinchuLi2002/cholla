@@ -7,7 +7,7 @@ module load cray-python
 module load rocm
 module load craype-accel-amd-gfx90a
 module load cray-hdf5 cray-fftw
-module load googletest/1.10.0
+module load googletest/1.14.0
 
 #-- GPU-aware MPI
 export MPICH_GPU_SUPPORT_ENABLED=1
@@ -15,4 +15,3 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export LD_LIBRARY_PATH=${CRAY_LD_LIBRARY_PATH}:${LD_LIBRARY_PATH}
 
 export CHOLLA_ENVSET=1
-export ROCFFT_RTC_CACHE_PATH=/dev/null

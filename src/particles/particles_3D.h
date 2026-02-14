@@ -9,11 +9,16 @@
     #include <string.h>
 
     #include <cstdlib>
+    #include <map>
+    #include <string>
 
     #include "../global/global.h"
     #include "../gravity/grav3D.h"
+    #include "../grid/spatial_domain_props.h"
 
     #ifdef PARTICLES_GPU
+      #include "../utils/gpu.hpp"  // cudaFree
+
       #define TPB_PARTICLES 1024
       // #define PRINT_GPU_MEMORY
       #define PRINT_MAX_MEMORY_USAGE
@@ -216,8 +221,8 @@ class Particles3D
 
   Particles3D(void);
 
-  void Initialize(struct Parameters *P, Grav3D &Grav, Real xbound, Real ybound, Real zbound, Real xdglobal,
-                  Real ydglobal, Real zdglobal);
+  void Initialize(Parameters *P, const SpatialDomainProps &spatial_props, Real xbound, Real ybound, Real zbound,
+                  Real xdglobal, Real ydglobal, Real zdglobal);
 
   void Allocate_Particles_Grid_Field_Real(Real **array_dev, int size);
   void Free_GPU_Array_Real(Real *array);
@@ -272,13 +277,15 @@ class Particles3D
                                                       Real *pos_y_dev, Real *pos_z_dev, Real *vel_x_dev,
                                                       Real *vel_y_dev, Real *vel_z_dev, Real *grav_x_dev,
                                                       Real *grav_y_dev, Real *grav_z_dev, Real current_a, Real H0,
-                                                      Real cosmo_h, Real Omega_M, Real Omega_L, Real Omega_K);
+                                                      Real cosmo_h, Real Omega_M, Real Omega_L, Real Omega_K,
+                                                      Real Omega_R, Real w0, Real wa);
   void Advance_Particles_KDK_Step2_GPU_function(part_int_t n_local, Real dt, Real *vel_x_dev, Real *vel_y_dev,
                                                 Real *vel_z_dev, Real *grav_x_dev, Real *grav_y_dev, Real *grav_z_dev);
   void Advance_Particles_KDK_Step2_Cosmo_GPU_function(part_int_t n_local, Real delta_a, Real *vel_x_dev,
                                                       Real *vel_y_dev, Real *vel_z_dev, Real *grav_x_dev,
                                                       Real *grav_y_dev, Real *grav_z_dev, Real current_a, Real H0,
-                                                      Real cosmo_h, Real Omega_M, Real Omega_L, Real Omega_K);
+                                                      Real cosmo_h, Real Omega_M, Real Omega_L, Real Omega_K,
+                                                      Real Omega_R, Real w0, Real wa);
   part_int_t Compute_Particles_GPU_Array_Size(part_int_t n);
   int Select_Particles_to_Transfer_GPU(int direction, int side);
   void Copy_Transfer_Particles_to_Buffer_GPU(int n_transfer, int direction, int side, Real *send_buffer,
@@ -299,11 +306,16 @@ class Particles3D
 
   void Initialize_Sphere(struct Parameters *P);
 
-    #if defined(PARTICLE_AGE) && !defined(SINGLE_PARTICLE_MASS) && defined(PARTICLE_IDS)
+  void Initialize_Stellar_Clusters_Helper_(std::map<std::string, real_vector_t> &real_props,
+                                           std::map<std::string, int_vector_t> &int_props);
+
+  void Initialize_Isolated_Stellar_Cluster(struct Parameters *P);
+
   void Initialize_Disk_Stellar_Clusters(struct Parameters *P);
-    #endif
 
   void Initialize_Zeldovich_Pancake(struct Parameters *P);
+
+  void Initialize_Adiabatic_Expansion(struct Parameters *P);
 
   void Load_Particles_Data(struct Parameters *P);
 

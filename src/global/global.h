@@ -41,6 +41,7 @@ typedef double Real;
 #define LENGTH_UNIT         3.08567758e21  // 1 kpc in cm
 #define MASS_UNIT           1.98847e33     // 1 solar mass in grams
 #define DENSITY_UNIT        (MASS_UNIT / (LENGTH_UNIT * LENGTH_UNIT * LENGTH_UNIT))
+#define FORCE_UNIT          (MASS_UNIT * LENGTH_UNIT / TIME_UNIT / TIME_UNIT)
 #define VELOCITY_UNIT       (LENGTH_UNIT / TIME_UNIT)
 #define ENERGY_UNIT         (DENSITY_UNIT * VELOCITY_UNIT * VELOCITY_UNIT)
 #define PRESSURE_UNIT       (DENSITY_UNIT * VELOCITY_UNIT * VELOCITY_UNIT)
@@ -49,6 +50,8 @@ typedef double Real;
 
 #define LOG_FILE_NAME "run_output.log"
 
+// mean molecular weight
+#define MU 0.6
 // Parameters for Enzo dual Energy Condition
 // - Prior to GH PR #356, DE_ETA_1 nominally had a value of 0.001 in all
 //   simulations (in practice, the value of DE_ETA_1 had minimal significance
@@ -149,10 +152,8 @@ extern Real C_cfl;  // CFL number (0 - 0.5)
 extern Real t_comm;
 extern Real t_other;
 
-#ifdef COOLING_GPU
 extern float *cooling_table;
 extern float *heating_table;
-#endif
 
 /*! \fn void Set_Gammas(Real gamma_in)
  *  \brief Set gamma values for Riemann solver. */
@@ -206,6 +207,7 @@ struct Parameters {
 #endif
   bool output_always      = false;
   bool legacy_flat_outdir = false;
+  int n_steps_limit       = -1;  // Note that negative values indicate that there is no limit
 #ifdef STATIC_GRAV
   int custom_grav = 0;  // flag to set specific static gravity field
 #endif
@@ -282,8 +284,13 @@ struct Parameters {
   // machine dependent seed will be generated.
   std::uint_fast64_t prng_seed = 0;
 #endif  // PARTICLES
-#ifdef SUPERNOVA
+#ifdef FEEDBACK
+  #ifndef NO_SN_FEEDBACK
   char snr_filename[MAXLEN];
+  #endif
+  #ifndef NO_WIND_FEEDBACK
+  char sw_filename[MAXLEN];
+  #endif
 #endif
 #ifdef ROTATED_PROJECTION
   // initialize rotation parameters to zero
@@ -303,21 +310,25 @@ struct Parameters {
   Real Omega_M;
   Real Omega_L;
   Real Omega_b;
+  Real Omega_R;
+  Real w0;
+  Real wa;
   Real Init_redshift;
   Real End_redshift;
-  char scale_outputs_file[MAXLEN];  // File for the scale_factor output values
-                                    // for cosmological simulations
-#endif                              // COSMOLOGY
+
+  // File for the scale_factor output values for cosmological simulations
+  char scale_outputs_file[MAXLEN];
+  #define EXPANSION_HISTORY_FILE_NAME "expansion_history.txt"
+#endif  // COSMOLOGY
 #ifdef TILED_INITIAL_CONDITIONS
   Real tile_length;
 #endif  // TILED_INITIAL_CONDITIONS
 
-#ifdef SET_MPI_GRID
-  // Set the MPI Processes grid [n_proc_x, n_proc_y, n_proc_z]
+  // Set the MPI Processes grid [n_proc_x, n_proc_y, n_proc_z] (if they aren't provided, they are set to 0)
   int n_proc_x;
   int n_proc_y;
   int n_proc_z;
-#endif
+
   int bc_potential_type;
 #if defined(COOLING_GRACKLE) || defined(CHEMISTRY_GPU)
   char UVB_rates_file[MAXLEN];  // File for the UVB photoheating and
@@ -344,9 +355,19 @@ struct Parameters {
 #endif
 };
 
-/*! \fn void parse_params(char *param_file, struct Parameters * parms);
- *  \brief Reads the parameters in the given file into a structure. */
-extern void Parse_Params(char *param_file, struct Parameters *parms, int argc, char **argv);
+class ParameterMap;
+
+/*! \brief Reads the from the ParameterMap into the primary Parameters structure.
+ *
+ *  \note
+ *  We opt to pass in an existing ParamterMap (by reference), rather than having this
+ *  function return a ParameterMap, so that we can get away with simply forward-declaring
+ *  ParameterMap (rather than including the full definition)
+ */
+void Parse_Params(ParameterMap &pmap, struct Parameters *parms);
+
+/*! \brief prints a warning if pmap contains any unused parameters */
+void Warn_Unused_Params(ParameterMap &pmap);
 
 /*! \fn int is_param_valid(char *name);
  * \brief Verifies that a param is valid (even if not needed).  Avoids

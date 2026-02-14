@@ -312,13 +312,12 @@ TEST(tMHDCellCenteredMagneticFields, CorrectInputExpectCorrectOutput)
   double const fiducialAvgBx = 637.5, fiducialAvgBy = 761.5, fiducialAvgBz = 883.5;
 
   // Call the function to test
-  auto [testAvgBx, testAvgBy, testAvgBz] =
-      mhd::utils::cellCenteredMagneticFields(testGrid.data(), id, xid, yid, zid, n_cells, nx, ny);
+  auto test_magnetic = mhd::utils::cellCenteredMagneticFields(testGrid.data(), id, xid, yid, zid, n_cells, nx, ny);
 
   // Check the results
-  testing_utilities::Check_Results(fiducialAvgBx, testAvgBx, "cell centered Bx value");
-  testing_utilities::Check_Results(fiducialAvgBy, testAvgBy, "cell centered By value");
-  testing_utilities::Check_Results(fiducialAvgBz, testAvgBz, "cell centered Bz value");
+  testing_utilities::Check_Results(fiducialAvgBx, test_magnetic.x(), "cell centered Bx value");
+  testing_utilities::Check_Results(fiducialAvgBy, test_magnetic.y(), "cell centered By value");
+  testing_utilities::Check_Results(fiducialAvgBz, test_magnetic.z(), "cell centered Bz value");
 }
 #endif  // MHD
 // =============================================================================

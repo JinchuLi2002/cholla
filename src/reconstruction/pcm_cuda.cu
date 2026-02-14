@@ -287,7 +287,7 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
     }
 #endif  // SCALAR
 #ifdef MHD
-    auto const [cellCenteredBx, cellCenteredBy, cellCenteredBz] =
+    auto const magnetic_centered =
         mhd::utils::cellCenteredMagneticFields(dev_conserved, id, xid, yid, zid, n_cells, nx, ny);
 #endif  // MHD
 #ifdef DE
@@ -310,8 +310,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
     }
 #endif  // SCALAR
 #ifdef MHD
-    dev_bounds_Lx[(grid_enum::Q_x_magnetic_y)*n_cells + id] = cellCenteredBy;
-    dev_bounds_Lx[(grid_enum::Q_x_magnetic_z)*n_cells + id] = cellCenteredBz;
+    dev_bounds_Lx[(grid_enum::Q_x_magnetic_y)*n_cells + id] = magnetic_centered.y();
+    dev_bounds_Lx[(grid_enum::Q_x_magnetic_z)*n_cells + id] = magnetic_centered.z();
 #endif  // MHD
 #ifdef DE
     dev_bounds_Lx[(n_fields - 1) * n_cells + id] = ge;
@@ -329,8 +329,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
     }
 #endif  // SCALAR
 #ifdef MHD
-    dev_bounds_Ly[(grid_enum::Q_y_magnetic_z)*n_cells + id] = cellCenteredBz;
-    dev_bounds_Ly[(grid_enum::Q_y_magnetic_x)*n_cells + id] = cellCenteredBx;
+    dev_bounds_Ly[(grid_enum::Q_y_magnetic_z)*n_cells + id] = magnetic_centered.z();
+    dev_bounds_Ly[(grid_enum::Q_y_magnetic_x)*n_cells + id] = magnetic_centered.x();
 #endif  // MHD
 #ifdef DE
     dev_bounds_Ly[(n_fields - 1) * n_cells + id] = ge;
@@ -348,8 +348,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
     }
 #endif  // SCALAR
 #ifdef MHD
-    dev_bounds_Lz[(grid_enum::Q_z_magnetic_x)*n_cells + id] = cellCenteredBx;
-    dev_bounds_Lz[(grid_enum::Q_z_magnetic_y)*n_cells + id] = cellCenteredBy;
+    dev_bounds_Lz[(grid_enum::Q_z_magnetic_x)*n_cells + id] = magnetic_centered.x();
+    dev_bounds_Lz[(grid_enum::Q_z_magnetic_y)*n_cells + id] = magnetic_centered.y();
 #endif  // MHD
 #ifdef DE
     dev_bounds_Lz[(n_fields - 1) * n_cells + id] = ge;
@@ -369,8 +369,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
       }
 #endif  // SCALAR
 #ifdef MHD
-      dev_bounds_Rx[(grid_enum::Q_x_magnetic_y)*n_cells + id] = cellCenteredBy;
-      dev_bounds_Rx[(grid_enum::Q_x_magnetic_z)*n_cells + id] = cellCenteredBz;
+      dev_bounds_Rx[(grid_enum::Q_x_magnetic_y)*n_cells + id] = magnetic_centered.y();
+      dev_bounds_Rx[(grid_enum::Q_x_magnetic_z)*n_cells + id] = magnetic_centered.z();
 #endif  // MHD
 #ifdef DE
       dev_bounds_Rx[(n_fields - 1) * n_cells + id] = ge;
@@ -391,8 +391,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
       }
 #endif  // SCALAR
 #ifdef MHD
-      dev_bounds_Ry[(grid_enum::Q_y_magnetic_z)*n_cells + id] = cellCenteredBz;
-      dev_bounds_Ry[(grid_enum::Q_y_magnetic_x)*n_cells + id] = cellCenteredBx;
+      dev_bounds_Ry[(grid_enum::Q_y_magnetic_z)*n_cells + id] = magnetic_centered.z();
+      dev_bounds_Ry[(grid_enum::Q_y_magnetic_x)*n_cells + id] = magnetic_centered.x();
 #endif  // MHD
 #ifdef DE
       dev_bounds_Ry[(n_fields - 1) * n_cells + id] = ge;
@@ -413,8 +413,8 @@ __global__ void PCM_Reconstruction_3D(Real *dev_conserved, Real *dev_bounds_Lx, 
       }
 #endif  // SCALAR
 #ifdef MHD
-      dev_bounds_Rz[(grid_enum::Q_z_magnetic_x)*n_cells + id] = cellCenteredBx;
-      dev_bounds_Rz[(grid_enum::Q_z_magnetic_y)*n_cells + id] = cellCenteredBy;
+      dev_bounds_Rz[(grid_enum::Q_z_magnetic_x)*n_cells + id] = magnetic_centered.x();
+      dev_bounds_Rz[(grid_enum::Q_z_magnetic_y)*n_cells + id] = magnetic_centered.y();
 #endif  // MHD
 #ifdef DE
       dev_bounds_Rz[(n_fields - 1) * n_cells + id] = ge;

@@ -10,6 +10,7 @@
 #include "../global/global.h"
 #include "../global/global_cuda.h"
 #include "../gravity/static_grav.h"
+#include "../hydro/average_cells.h"
 #include "../hydro/hydro_cuda.h"
 #include "../utils/DeviceVector.h"
 #include "../utils/cuda_utilities.h"
@@ -377,14 +378,39 @@ __global__ void Update_Conserved_Variables_3D(Real *dev_conserved, Real *Q_Lx, R
         0.5 * dt * (gx * (d * vx + d_n * vx_n) + gy * (d * vy + d_n * vy_n) + gz * (d * vz + d_n * vz_n));
 
 #endif  // GRAVITY
+  }
+}
 
+__global__ void PostUpdate_Conserved_Correct_Crashed_3D(Real *dev_conserved, int nx, int ny, int nz, int x_off,
+                                                        int y_off, int z_off, int n_ghost, Real gamma, int n_fields,
+                                                        SlowCellConditionChecker slow_check, int *any_error)
+{
+  int n_cells = nx * ny * nz;
+
+  // get a global thread ID
+  int id  = threadIdx.x + blockIdx.x * blockDim.x;
+  int zid = id / (nx * ny);
+  int yid = (id - zid * nx * ny) / nx;
+  int xid = id - zid * nx * ny - yid * nx;
+
+  if (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost && zid > n_ghost - 1 &&
+      zid < nz - n_ghost) {
+    // threads corresponding to real cells do the calculation
+
+    // this logic get's skipped if we apply both a density floor and temperature floor
+    // (we apply the logic if we only use one kind of floor or we use neither kind)
 #if !(defined(DENSITY_FLOOR) && defined(TEMPERATURE_FLOOR))
-    if (dev_conserved[id] < 0.0 || dev_conserved[id] != dev_conserved[id] || dev_conserved[4 * n_cells + id] < 0.0 ||
-        dev_conserved[4 * n_cells + id] != dev_conserved[4 * n_cells + id]) {
-      printf("%3d %3d %3d Thread crashed in final update. %e %e %e %e %e\n", xid + x_off, yid + y_off, zid + z_off,
-             dev_conserved[id], dtodx * (dev_F_x[imo] - dev_F_x[id]), dtody * (dev_F_y[jmo] - dev_F_y[id]),
-             dtodz * (dev_F_z[kmo] - dev_F_z[id]), dev_conserved[4 * n_cells + id]);
-      Average_Cell_All_Fields(xid, yid, zid, nx, ny, nz, n_cells, n_fields, gamma, dev_conserved);
+    if (Cell_Is_Crashed(dev_conserved[grid_enum::density * n_cells + id],
+                        dev_conserved[grid_enum::Energy * n_cells + id])) {
+      printf("%3d %3d %3d Thread crashed in final update. %e - - - %e\n", xid + x_off, yid + y_off, zid + z_off,
+             dev_conserved[grid_enum::density * n_cells + id], dev_conserved[grid_enum::Energy * n_cells + id]);
+      bool success = Average_Cell_All_Fields(xid, yid, zid, nx, ny, nz, n_cells, n_fields, gamma, dev_conserved,
+                                             n_ghost, slow_check);
+      if (!success) {
+        printf("%3d %3d %3d there was an issue with averaging the neighboring cells\n", xid + x_off, yid + y_off,
+               zid + z_off);
+        *any_error = 1;
+      }
     }
 #endif  // DENSITY_FLOOR
     /*
@@ -400,7 +426,6 @@ __global__ void Update_Conserved_Variables_3D(Real *dev_conserved, Real *Q_Lx, R
     */
   }
 }
-
 __device__ __host__ Real hydroInverseCrossingTime(Real const &E, Real const &d, Real const &d_inv, Real const &vx,
                                                   Real const &vy, Real const &vz, Real const &dx, Real const &dy,
                                                   Real const &dz, Real const &gamma)
@@ -546,9 +571,10 @@ __global__ void Calc_dt_3D(Real *dev_conserved, Real *dev_dti, Real gamma, int n
 #ifdef MHD
       // Compute the cell centered magnetic field using a straight average of
       // the faces
-      auto const [avgBx, avgBy, avgBz] =
+      auto const magnetic_centered =
           mhd::utils::cellCenteredMagneticFields(dev_conserved, id, xid, yid, zid, n_cells, nx, ny);
-      max_dti = fmax(max_dti, mhdInverseCrossingTime(E, d, d_inv, vx, vy, vz, avgBx, avgBy, avgBz, dx, dy, dz, gamma));
+      max_dti = fmax(max_dti, mhdInverseCrossingTime(E, d, d_inv, vx, vy, vz, magnetic_centered.x(),
+                                                     magnetic_centered.y(), magnetic_centered.z(), dx, dy, dz, gamma));
 #else   // not MHD
       max_dti = fmax(max_dti, hydroInverseCrossingTime(E, d, d_inv, vx, vy, vz, dx, dy, dz, gamma));
 #endif  // MHD
@@ -574,20 +600,20 @@ Real Calc_dt_GPU(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n
   {
     // set launch parameters for GPU kernels.
     cuda_utilities::AutomaticLaunchParams static const launchParams(Calc_dt_1D);
-    hipLaunchKernelGGL(Calc_dt_1D, launchParams.numBlocks, launchParams.threadsPerBlock, 0, 0, dev_conserved,
-                       dev_dti.data(), gamma, n_ghost, nx, dx);
+    hipLaunchKernelGGL(Calc_dt_1D, launchParams.get_numBlocks(), launchParams.get_threadsPerBlock(), 0, 0,
+                       dev_conserved, dev_dti.data(), gamma, n_ghost, nx, dx);
   } else if (nx > 1 && ny > 1 && nz == 1)  // 2D
   {
     // set launch parameters for GPU kernels.
     cuda_utilities::AutomaticLaunchParams static const launchParams(Calc_dt_2D);
-    hipLaunchKernelGGL(Calc_dt_2D, launchParams.numBlocks, launchParams.threadsPerBlock, 0, 0, dev_conserved,
-                       dev_dti.data(), gamma, n_ghost, nx, ny, dx, dy);
+    hipLaunchKernelGGL(Calc_dt_2D, launchParams.get_numBlocks(), launchParams.get_threadsPerBlock(), 0, 0,
+                       dev_conserved, dev_dti.data(), gamma, n_ghost, nx, ny, dx, dy);
   } else if (nx > 1 && ny > 1 && nz > 1)  // 3D
   {
     // set launch parameters for GPU kernels.
     cuda_utilities::AutomaticLaunchParams static const launchParams(Calc_dt_3D);
-    hipLaunchKernelGGL(Calc_dt_3D, launchParams.numBlocks, launchParams.threadsPerBlock, 0, 0, dev_conserved,
-                       dev_dti.data(), gamma, n_ghost, n_fields, nx, ny, nz, dx, dy, dz);
+    hipLaunchKernelGGL(Calc_dt_3D, launchParams.get_numBlocks(), launchParams.get_threadsPerBlock(), 0, 0,
+                       dev_conserved, dev_dti.data(), gamma, n_ghost, n_fields, nx, ny, nz, dx, dy, dz);
   }
   GPU_Error_Check();
 
@@ -596,10 +622,94 @@ Real Calc_dt_GPU(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n
   return dev_dti[0];
 }
 
+__global__ void Temperature_Ceiling_Kernel(Real *conserved, int nx, int ny, int nz, int n_ghost, int n_fields,
+                                           Real gamma, Real T_ceiling, int *counter)
+{
+  const int id      = threadIdx.x + blockIdx.x * blockDim.x;
+  const int n_cells = nx * ny * nz;
+  int xid, yid, zid;
+  cuda_utilities::compute3DIndices(id, nx, ny, xid, yid, zid);
+  const bool real_cell = (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost &&
+                          zid > n_ghost - 1 && zid < nz - n_ghost);
+  if (!real_cell) return;
+
+  const Real d  = conserved[grid_enum::density * n_cells + id];
+  const Real mx = conserved[grid_enum::momentum_x * n_cells + id];
+  const Real my = conserved[grid_enum::momentum_y * n_cells + id];
+  const Real mz = conserved[grid_enum::momentum_z * n_cells + id];
+  const Real E  = conserved[grid_enum::Energy * n_cells + id];
+
+  // compute 1/density (we take some care to avoid a source of NANs)
+  const Real d_inv = 1.0 / (d + TINY_NUMBER * (d == 0.0));
+
+  // calculate local kinetic energy
+  const Real KE = 0.5 * d_inv * ((mx * mx) + ((my * my) + (mz * mz)));
+
+  // convert T_ceiling to specific_eint_ceiling
+  // -> keep in mind, that specific internal energy has units of velocity^2
+  const Real particle_mass          = 0.6 * MP;
+  const Real specific_eint_ceil_CGS = KB * T_ceiling / (particle_mass * (gamma - 1));
+  const Real specific_eint_ceil     = specific_eint_ceil_CGS * (VELOCITY_UNIT * VELOCITY_UNIT);
+
+  const Real local_eint_ceil = d * specific_eint_ceil;
+  const Real local_etot_ceil = local_eint_ceil + KE;
+
+  bool applied_ceiling = false;
+
+  if (E > local_etot_ceil) {
+    conserved[grid_enum::Energy * n_cells + id] = local_etot_ceil;
+    applied_ceiling                             = true;
+  }
+
+#ifdef DE
+  if (conserved[grid_enum::GasEnergy * n_cells + id] > local_eint_ceil) {
+    conserved[grid_enum::GasEnergy * n_cells + id] = local_eint_ceil;
+    applied_ceiling                                = true;
+  }
+#endif  // DE
+
+  if (applied_ceiling) atomicAdd(counter, 1);
+}
+
+void Temperature_Ceiling(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields, Real gamma,
+                         Real T_ceiling)
+{
+  int n_cells = nx * ny * nz;
+  int ngrid   = (n_cells + TPB - 1) / TPB;
+  dim3 dim1dGrid(ngrid, 1, 1);
+  dim3 dim1dBlock(TPB, 1, 1);
+
+  cuda_utilities::DeviceVector<int> counter(1, true);
+  int *dev_counter = counter.data();
+
+  if (nx > 1 && ny > 1 && nz > 1) {  // 3D
+    hipLaunchKernelGGL(Temperature_Ceiling_Kernel, dim1dGrid, dim1dBlock, 0, 0, dev_conserved, nx, ny, nz, n_ghost,
+                       n_fields, gamma, T_ceiling, dev_counter);
+  }
+  int host_counter = counter[0];
+  if (host_counter > 0) {
+    printf("HYDRO WARNING: Temperature Ceiling applied to num_cells: %d \n", host_counter);
+  }
+}
+
+__device__ Real SlowCellConditionChecker::max_dti_if_slow(Real total_energy, Real density, Real density_inv,
+                                                          Real velocity_x, Real velocity_y, Real velocity_z,
+                                                          Real gamma) const
+{
+#ifndef AVERAGE_SLOW_CELLS
+  return -1.0;
+#else
+  Real max_dti = hydroInverseCrossingTime(total_energy, density, density_inv, velocity_x, velocity_y, velocity_z,
+                                          this->dx, this->dy, this->dz, gamma);
+  return (max_dti > this->max_dti_slow) ? max_dti : -1.0;
+#endif
+}
+
 #ifdef AVERAGE_SLOW_CELLS
 
-void Average_Slow_Cells(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields, Real dx, Real dy,
-                        Real dz, Real gamma, Real max_dti_slow)
+void Average_Slow_Cells(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields, Real gamma,
+                        SlowCellConditionChecker slow_check, Real xbound, Real ybound, Real zbound, int nx_offset,
+                        int ny_offset, int nz_offset)
 {
   // set values for GPU kernels
   int n_cells = nx * ny * nz;
@@ -611,12 +721,13 @@ void Average_Slow_Cells(Real *dev_conserved, int nx, int ny, int nz, int n_ghost
 
   if (nx > 1 && ny > 1 && nz > 1) {  // 3D
     hipLaunchKernelGGL(Average_Slow_Cells_3D, dim1dGrid, dim1dBlock, 0, 0, dev_conserved, nx, ny, nz, n_ghost, n_fields,
-                       dx, dy, dz, gamma, max_dti_slow);
+                       gamma, slow_check, xbound, ybound, zbound, nx_offset, ny_offset, nz_offset);
   }
 }
 
-__global__ void Average_Slow_Cells_3D(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields, Real dx,
-                                      Real dy, Real dz, Real gamma, Real max_dti_slow)
+__global__ void Average_Slow_Cells_3D(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields,
+                                      Real gamma, SlowCellConditionChecker slow_check, Real xbound, Real ybound,
+                                      Real zbound, int nx_offset, int ny_offset, int nz_offset)
 {
   int id, xid, yid, zid, n_cells;
   Real d, d_inv, vx, vy, vz, E, max_dti;
@@ -638,22 +749,26 @@ __global__ void Average_Slow_Cells_3D(Real *dev_conserved, int nx, int ny, int n
     vz    = dev_conserved[3 * n_cells + id] * d_inv;
     E     = dev_conserved[4 * n_cells + id];
 
-    // Compute the maximum inverse crossing time in the cell
-    max_dti = hydroInverseCrossingTime(E, d, d_inv, vx, vy, vz, dx, dy, dz, gamma);
+    // retrieve the max inverse crossing time in the cell if the cell meets the threshold for being a slow-cell.
+    // (if the cell doesn't meet the threshold, a negative value is returned instead)
+    max_dti = slow_check.max_dti_if_slow(E, d, d_inv, vx, vy, vz, gamma);
 
-    if (max_dti > max_dti_slow) {
-      speed = sqrt(vx * vx + vy * vy + vz * vz);
-      temp  = (gamma - 1) * (E - 0.5 * (speed * speed) * d) * ENERGY_UNIT / (d * DENSITY_UNIT / 0.6 / MP) / KB;
-      P     = (E - 0.5 * d * (vx * vx + vy * vy + vz * vz)) * (gamma - 1.0);
-      cs    = sqrt(d_inv * gamma * P) * VELOCITY_UNIT * 1e-5;
+    if (max_dti > 0) {
+      speed  = sqrt(vx * vx + vy * vy + vz * vz);
+      temp   = (gamma - 1) * (E - 0.5 * (speed * speed) * d) * ENERGY_UNIT / (d * DENSITY_UNIT / 0.6 / MP) / KB;
+      P      = (E - 0.5 * d * (vx * vx + vy * vy + vz * vz)) * (gamma - 1.0);
+      cs     = sqrt(d_inv * gamma * P) * VELOCITY_UNIT * 1e-5;
+      Real x = xbound + (nx_offset + xid - n_ghost + 0.5) * slow_check.dx;
+      Real y = ybound + (ny_offset + yid - n_ghost + 0.5) * slow_check.dy;
+      Real z = zbound + (nz_offset + zid - n_ghost + 0.5) * slow_check.dz;
       // Average this cell
       kernel_printf(
-          " Average Slow Cell [ %d %d %d ] -> dt_cell=%f    dt_min=%f, n=%.3e, "
+          " Average Slow Cell [ %.5e %.5e %.5e ] -> dt_cell=%f    dt_min=%f, n=%.3e, "
           "T=%.3e, v=%.3e (%.3e, %.3e, %.3e), cs=%.3e\n",
-          xid, yid, zid, 1. / max_dti, 1. / max_dti_slow, dev_conserved[id] * DENSITY_UNIT / 0.6 / MP, temp,
+          x, y, z, 1. / max_dti, 1. / slow_check.max_dti_slow, dev_conserved[id] * DENSITY_UNIT / 0.6 / MP, temp,
           speed * VELOCITY_UNIT * 1e-5, vx * VELOCITY_UNIT * 1e-5, vy * VELOCITY_UNIT * 1e-5, vz * VELOCITY_UNIT * 1e-5,
           cs);
-      Average_Cell_All_Fields(xid, yid, zid, nx, ny, nz, n_cells, n_fields, gamma, dev_conserved);
+      Average_Cell_All_Fields(xid, yid, zid, nx, ny, nz, n_cells, n_fields, gamma, dev_conserved, n_ghost, slow_check);
     }
   }
 }
@@ -790,7 +905,7 @@ __global__ void Partial_Update_Advected_Internal_Energy_3D(Real *dev_conserved, 
   #ifdef MHD
     // Add the magnetic energy
     auto magnetic_centered = mhd::utils::cellCenteredMagneticFields(dev_conserved, id, xid, yid, zid, n_cells, nx, ny);
-    E_kin += mhd::utils::computeMagneticEnergy(magnetic_centered.x, magnetic_centered.y, magnetic_centered.z);
+    E_kin += mhd::utils::computeMagneticEnergy(magnetic_centered.x(), magnetic_centered.y(), magnetic_centered.z());
   #endif  // MHD
     P = hydro_utilities::Get_Pressure_From_DE(E, E - E_kin, GE, gamma);
     P = fmax(P, (Real)TINY_NUMBER);
@@ -832,272 +947,6 @@ __global__ void Partial_Update_Advected_Internal_Energy_3D(Real *dev_conserved, 
   }
 }
 
-__global__ void Select_Internal_Energy_1D(Real *dev_conserved, int nx, int n_ghost, int n_fields)
-{
-  int id, xid, n_cells;
-  Real d, d_inv, vx, vy, vz, E, U_total, U_advected, U, Emax;
-  int imo, ipo;
-  n_cells = nx;
-
-  Real eta_1 = DE_ETA_1;
-  Real eta_2 = DE_ETA_2;
-
-  // get a global thread ID
-  id  = threadIdx.x + blockIdx.x * blockDim.x;
-  xid = id;
-
-  imo = max(xid - 1, n_ghost);
-  ipo = min(xid + 1, nx - n_ghost - 1);
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d          = dev_conserved[id];
-    d_inv      = 1.0 / d;
-    vx         = dev_conserved[1 * n_cells + id] * d_inv;
-    vy         = dev_conserved[2 * n_cells + id] * d_inv;
-    vz         = dev_conserved[3 * n_cells + id] * d_inv;
-    E          = dev_conserved[4 * n_cells + id];
-    U_advected = dev_conserved[(n_fields - 1) * n_cells + id];
-    U_total    = E - 0.5 * d * (vx * vx + vy * vy + vz * vz);
-
-    // find the max nearby total energy
-    Emax = fmax(dev_conserved[4 * n_cells + imo], E);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + ipo]);
-
-    // We only use the "advected" internal energy if both:
-    // - the thermal energy divided by total energy is a small fraction (smaller than eta_1)
-    // - AND we aren't masking shock heating (details controlled by Emax & eta_2)
-    if ((U_total / E > eta_1) or (U_total / Emax > eta_2)) {
-      U = U_total;
-    } else {
-      U = U_advected;
-    }
-
-    // Optional: Avoid Negative Internal  Energies
-    U = fmax(U, (Real)TINY_NUMBER);
-
-    // Write Selected internal energy to the GasEnergy array ONLY
-    // to avoid mixing updated and non-updated values of E
-    // since the Dual Energy condition depends on the neighbor cells
-    dev_conserved[(n_fields - 1) * n_cells + id] = U;
-  }
-}
-
-__global__ void Select_Internal_Energy_2D(Real *dev_conserved, int nx, int ny, int n_ghost, int n_fields)
-{
-  int id, xid, yid, n_cells;
-  Real d, d_inv, vx, vy, vz, E, U_total, U_advected, U, Emax;
-  int imo, ipo, jmo, jpo;
-  n_cells = nx * ny;
-
-  Real eta_1 = DE_ETA_1;
-  Real eta_2 = DE_ETA_2;
-
-  // get a global thread ID
-  int blockId = blockIdx.x + blockIdx.y * gridDim.x;
-  id          = threadIdx.x + blockId * blockDim.x;
-  yid         = id / nx;
-  xid         = id - yid * nx;
-
-  imo = max(xid - 1, n_ghost);
-  imo = imo + yid * nx;
-  ipo = min(xid + 1, nx - n_ghost - 1);
-  ipo = ipo + yid * nx;
-  jmo = max(yid - 1, n_ghost);
-  jmo = xid + jmo * nx;
-  jpo = min(yid + 1, ny - n_ghost - 1);
-  jpo = xid + jpo * nx;
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d          = dev_conserved[id];
-    d_inv      = 1.0 / d;
-    vx         = dev_conserved[1 * n_cells + id] * d_inv;
-    vy         = dev_conserved[2 * n_cells + id] * d_inv;
-    vz         = dev_conserved[3 * n_cells + id] * d_inv;
-    E          = dev_conserved[4 * n_cells + id];
-    U_advected = dev_conserved[(n_fields - 1) * n_cells + id];
-    U_total    = E - 0.5 * d * (vx * vx + vy * vy + vz * vz);
-
-    // find the max nearby total energy
-    Emax = fmax(dev_conserved[4 * n_cells + imo], E);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + ipo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + jmo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + jpo]);
-
-    // We only use the "advected" internal energy if both:
-    // - the thermal energy divided by total energy is a small fraction (smaller than eta_1)
-    // - AND we aren't masking shock heating (details controlled by Emax & eta_2)
-    if ((U_total / E > eta_1) or (U_total / Emax > eta_2)) {
-      U = U_total;
-    } else {
-      U = U_advected;
-    }
-
-    // Optional: Avoid Negative Internal  Energies
-    U = fmax(U, (Real)TINY_NUMBER);
-
-    // Write Selected internal energy to the GasEnergy array ONLY
-    // to avoid mixing updated and non-updated values of E
-    // since the Dual Energy condition depends on the neighbour cells
-    dev_conserved[(n_fields - 1) * n_cells + id] = U;
-  }
-}
-
-__global__ void Select_Internal_Energy_3D(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields)
-{
-  int id, xid, yid, zid, n_cells;
-  Real d, d_inv, vx, vy, vz, E, U_total, U_advected, U, Emax;
-  int imo, ipo, jmo, jpo, kmo, kpo;
-  n_cells = nx * ny * nz;
-
-  Real eta_1 = DE_ETA_1;
-  Real eta_2 = DE_ETA_2;
-
-  // get a global thread ID
-  id  = threadIdx.x + blockIdx.x * blockDim.x;
-  zid = id / (nx * ny);
-  yid = (id - zid * nx * ny) / nx;
-  xid = id - zid * nx * ny - yid * nx;
-
-  imo = max(xid - 1, n_ghost);
-  imo = imo + yid * nx + zid * nx * ny;
-  ipo = min(xid + 1, nx - n_ghost - 1);
-  ipo = ipo + yid * nx + zid * nx * ny;
-  jmo = max(yid - 1, n_ghost);
-  jmo = xid + jmo * nx + zid * nx * ny;
-  jpo = min(yid + 1, ny - n_ghost - 1);
-  jpo = xid + jpo * nx + zid * nx * ny;
-  kmo = max(zid - 1, n_ghost);
-  kmo = xid + yid * nx + kmo * nx * ny;
-  kpo = min(zid + 1, nz - n_ghost - 1);
-  kpo = xid + yid * nx + kpo * nx * ny;
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost && zid > n_ghost - 1 &&
-      zid < nz - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d          = dev_conserved[id];
-    d_inv      = 1.0 / d;
-    vx         = dev_conserved[1 * n_cells + id] * d_inv;
-    vy         = dev_conserved[2 * n_cells + id] * d_inv;
-    vz         = dev_conserved[3 * n_cells + id] * d_inv;
-    E          = dev_conserved[4 * n_cells + id];
-    U_advected = dev_conserved[(n_fields - 1) * n_cells + id];
-    U_total    = E - 0.5 * d * (vx * vx + vy * vy + vz * vz);
-
-    // find the max nearby total energy
-    Emax = fmax(dev_conserved[4 * n_cells + imo], E);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + ipo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + jmo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + jpo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + kmo]);
-    Emax = fmax(Emax, dev_conserved[4 * n_cells + kpo]);
-
-    // We only use the "advected" internal energy if both:
-    // - the thermal energy divided by total energy is a small fraction (smaller than eta_1)
-    // - AND we aren't masking shock heating (details controlled by Emax & eta_2)
-    if ((U_total / E > eta_1) or (U_total / Emax > eta_2)) {
-      U = U_total;
-    } else {
-      U = U_advected;
-    }
-
-    // Optional: Avoid Negative Internal  Energies
-    U = fmax(U, (Real)TINY_NUMBER);
-
-    // Write Selected internal energy to the GasEnergy array ONLY
-    // to avoid mixing updated and non-updated values of E
-    // since the Dual Energy condition depends on the neighbour cells
-    dev_conserved[(n_fields - 1) * n_cells + id] = U;
-  }
-}
-
-__global__ void Sync_Energies_1D(Real *dev_conserved, int nx, int n_ghost, Real gamma, int n_fields)
-{
-  int id, xid, n_cells;
-  Real d, d_inv, vx, vy, vz, U;
-  n_cells = nx;
-
-  // get a global thread ID
-  id  = threadIdx.x + blockIdx.x * blockDim.x;
-  xid = id;
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d     = dev_conserved[id];
-    d_inv = 1.0 / d;
-    vx    = dev_conserved[1 * n_cells + id] * d_inv;
-    vy    = dev_conserved[2 * n_cells + id] * d_inv;
-    vz    = dev_conserved[3 * n_cells + id] * d_inv;
-    U     = dev_conserved[(n_fields - 1) * n_cells + id];
-
-    // Use the previously selected Internal Energy to update the total energy
-    dev_conserved[4 * n_cells + id] = 0.5 * d * (vx * vx + vy * vy + vz * vz) + U;
-  }
-}
-
-__global__ void Sync_Energies_2D(Real *dev_conserved, int nx, int ny, int n_ghost, Real gamma, int n_fields)
-{
-  int id, xid, yid, n_cells;
-  Real d, d_inv, vx, vy, vz, U;
-  n_cells = nx * ny;
-
-  // get a global thread ID
-  int blockId = blockIdx.x + blockIdx.y * gridDim.x;
-  id          = threadIdx.x + blockId * blockDim.x;
-  yid         = id / nx;
-  xid         = id - yid * nx;
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d     = dev_conserved[id];
-    d_inv = 1.0 / d;
-    vx    = dev_conserved[1 * n_cells + id] * d_inv;
-    vy    = dev_conserved[2 * n_cells + id] * d_inv;
-    vz    = dev_conserved[3 * n_cells + id] * d_inv;
-    U     = dev_conserved[(n_fields - 1) * n_cells + id];
-
-    // Use the previously selected Internal Energy to update the total energy
-    dev_conserved[4 * n_cells + id] = 0.5 * d * (vx * vx + vy * vy + vz * vz) + U;
-  }
-}
-
-__global__ void Sync_Energies_3D(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, Real gamma, int n_fields)
-{
-  // Called in a separate kernel to avoid interfering with energy selection in
-  // Select_Internal_Energy
-
-  int id, xid, yid, zid, n_cells;
-  Real d, d_inv, vx, vy, vz, U;
-  n_cells = nx * ny * nz;
-
-  // get a global thread ID
-  id  = threadIdx.x + blockIdx.x * blockDim.x;
-  zid = id / (nx * ny);
-  yid = (id - zid * nx * ny) / nx;
-  xid = id - zid * nx * ny - yid * nx;
-
-  // threads corresponding to real cells do the calculation
-  if (xid > n_ghost - 1 && xid < nx - n_ghost && yid > n_ghost - 1 && yid < ny - n_ghost && zid > n_ghost - 1 &&
-      zid < nz - n_ghost) {
-    // every thread collects the conserved variables it needs from global memory
-    d     = dev_conserved[id];
-    d_inv = 1.0 / d;
-    vx    = dev_conserved[1 * n_cells + id] * d_inv;
-    vy    = dev_conserved[2 * n_cells + id] * d_inv;
-    vz    = dev_conserved[3 * n_cells + id] * d_inv;
-    U     = dev_conserved[(n_fields - 1) * n_cells + id];
-
-    // Use the previously selected Internal Energy to update the total energy
-    dev_conserved[4 * n_cells + id] = 0.5 * d * (vx * vx + vy * vy + vz * vz) + U;
-  }
-}
-
 #endif  // DE
 
 void Apply_Temperature_Floor(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields, Real U_floor)
@@ -1110,15 +959,22 @@ void Apply_Temperature_Floor(Real *dev_conserved, int nx, int ny, int nz, int n_
   //  number of threads per 1D block
   dim3 dim1dBlock(TPB, 1, 1);
 
+  cuda_utilities::DeviceVector<int> counter(1, true);
+  int *dev_counter = counter.data();
+
   hipLaunchKernelGGL(Temperature_Floor_Kernel, dim1dGrid, dim1dBlock, 0, 0, dev_conserved, nx, ny, nz, n_ghost,
-                     n_fields, U_floor);
+                     n_fields, U_floor, dev_counter);
+  int host_counter = counter[0];
+  if (host_counter > 0) {
+    printf("HYDRO WARNING: Temperature Floor applied to num_cells: %d \n", host_counter);
+  }
 }
 
 __global__ void Temperature_Floor_Kernel(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int n_fields,
-                                         Real U_floor)
+                                         Real U_floor, int *counter)
 {
   int id, xid, yid, zid, n_cells;
-  Real d, d_inv, vx, vy, vz, E, Ekin, U;
+  Real d, d_inv, vx, vy, vz, E, Ekin, Udens;
   n_cells = nx * ny * nz;
 
   // get a global thread ID
@@ -1138,17 +994,29 @@ __global__ void Temperature_Floor_Kernel(Real *dev_conserved, int nx, int ny, in
     E     = dev_conserved[4 * n_cells + id];
     Ekin  = 0.5 * d * (vx * vx + vy * vy + vz * vz);
 
-    U = (E - Ekin) / d;
-    if (U < U_floor) {
+    int num_applications = 0;
+
+    Udens = (E - Ekin);
+    if (Udens / d < U_floor) {
+      num_applications++;
       dev_conserved[4 * n_cells + id] = Ekin + d * U_floor;
     }
 
 #ifdef DE
-    U = dev_conserved[(n_fields - 1) * n_cells + id] / d;
-    if (U < U_floor) {
+    Udens = dev_conserved[(n_fields - 1) * n_cells + id];
+    if (Udens / d < U_floor) {
+      num_applications++;
       dev_conserved[(n_fields - 1) * n_cells + id] = d * U_floor;
     }
+#else
+    Udens = -123456789;  // set to a dumb-looking number so that it's clear that it's not real when printing it
 #endif
+
+    if (num_applications > 0) {
+      atomicAdd(counter, 1);
+      // printf("T_Floor %3d %3d %3d d: %e spec_Ekin:%e spec_eint_floor: %e BC: E_dens:%e GasEnergy_dens:%e\n", xid,
+      //        yid, zid, d, Ekin, U_floor, E, Udens);
+    }
   }
 }
 
@@ -1176,22 +1044,37 @@ __device__ Real Average_Cell_Single_Field(int field_indx, int i, int j, int k, i
   return v_avrg;
 }
 
-__device__ void Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int nz, int ncells, int n_fields,
-                                        Real gamma, Real *conserved)
+__device__ bool Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int nz, int ncells, int n_fields,
+                                        Real gamma, Real *conserved, int stale_depth,
+                                        SlowCellConditionChecker slow_check)
 {
   int id = i + (j)*nx + (k)*nx * ny;
 
-  Real d, mx, my, mz, E, P;
-  d  = conserved[grid_enum::density * ncells + id];
-  mx = conserved[grid_enum::momentum_x * ncells + id];
-  my = conserved[grid_enum::momentum_y * ncells + id];
-  mz = conserved[grid_enum::momentum_z * ncells + id];
-  E  = conserved[grid_enum::Energy * ncells + id];
-  P  = (E - (0.5 / d) * (mx * mx + my * my + mz * mz)) * (gamma - 1.0);
+  // print out the the values stored in the cell before the correction
+  // -> we put this logic (and variable declarations in its own scope) to force us to redeclare variables later
+  //    (this lets the compiler help us avoid silly errors where we forget to load a variable)
+  {
+    Real d, mx, my, mz, E, P, Udens;
+    d  = conserved[grid_enum::density * ncells + id];
+    mx = conserved[grid_enum::momentum_x * ncells + id];
+    my = conserved[grid_enum::momentum_y * ncells + id];
+    mz = conserved[grid_enum::momentum_z * ncells + id];
+    E  = conserved[grid_enum::Energy * ncells + id];
+    P  = (E - (0.5 / d) * (mx * mx + my * my + mz * mz)) * (gamma - 1.0);
 
-  printf("%3d %3d %3d BC: d: %e  E:%e  P:%e  vx:%e  vy:%e  vz:%e\n", i, j, k, d, E, P, mx / d, my / d, mz / d);
+#ifdef DE
+    Udens               = conserved[grid_enum::GasEnergy * ncells + id];
+    Real kinetic_energy = hydro_utilities::Calc_Kinetic_Energy_From_Momentum(d, mx, my, mz);
+    P                   = hydro_utilities::Get_Pressure_From_DE(E, E - kinetic_energy, Udens, gamma);
+#else
+    Udens = -123456789;  // set to a dumb-looking number so that it's clear that it's not real when printing it
+    P     = hydro_utilities::Calc_Pressure_Conserved(E, d, mx, my, mz, gamma);
+#endif
+    printf("%3d %3d %3d BC: d: %e  E:%e  P:%e  vx:%e  vy:%e  vz:%e  Uadv:%e\n", i, j, k, d, E, P, mx / d, my / d,
+           mz / d, Udens);
+  }
 
-  int idn;
+  // initialize the variables that we use to accumulate information about neighboring values
   int N = 0;
   Real d_av, vx_av, vy_av, vz_av, P_av;
   d_av = vx_av = vy_av = vz_av = P_av = 0.0;
@@ -1205,18 +1088,36 @@ __device__ void Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int
   for (int kk = k - 1; kk <= k + 1; kk++) {
     for (int jj = j - 1; jj <= j + 1; jj++) {
       for (int ii = i - 1; ii <= i + 1; ii++) {
-        idn = ii + jj * nx + kk * nx * ny;
-        d   = conserved[grid_enum::density * ncells + idn];
-        mx  = conserved[grid_enum::momentum_x * ncells + idn];
-        my  = conserved[grid_enum::momentum_y * ncells + idn];
-        mz  = conserved[grid_enum::momentum_z * ncells + idn];
-        P   = (conserved[grid_enum::Energy * ncells + idn] - (0.5 / d) * (mx * mx + my * my + mz * mz)) * (gamma - 1.0);
+        if (ii <= stale_depth - 1 || ii >= nx - stale_depth || jj <= stale_depth - 1 || jj >= ny - stale_depth ||
+            kk <= stale_depth - 1 || kk >= nz - stale_depth) {
+          continue;
+        }
+
+        int idn = ii + jj * nx + kk * nx * ny;
+        Real d  = conserved[grid_enum::density * ncells + idn];
+        Real mx = conserved[grid_enum::momentum_x * ncells + idn];
+        Real my = conserved[grid_enum::momentum_y * ncells + idn];
+        Real mz = conserved[grid_enum::momentum_z * ncells + idn];
+        Real E  = conserved[grid_enum::Energy * ncells + idn];
+
+        // this function CAN use the "advected internal energy" field to compute pressure when the dual energy
+        // formalism. This is because this function has an explicit pre-condition that this function can only
+        // be applied when the "advected internal energy" field and the "total energy" fields are properly reconciled
+#ifdef DE
+        Real P = hydro_utilities::Get_Pressure_From_DE(
+            E, E - hydro_utilities::Calc_Kinetic_Energy_From_Momentum(d, mx, my, mz),
+            conserved[grid_enum::GasEnergy * ncells + id], gamma);
+#else
+        Real P = hydro_utilities::Calc_Pressure_Conserved(E, d, mx, my, mz, gamma);
+#endif
+
 #ifdef SCALAR
         for (int n = 0; n < NSCALARS; n++) {  // NOLINT
           scalar[n] = conserved[grid_enum::scalar * ncells + idn];
         }
 #endif
-        if (d > 0.0 && P > 0.0) {
+        Real d_inv = 1.0 / d;
+        if (d > 0.0 && P > 0.0 && not slow_check.is_slow(E, d, d_inv, mx * d_inv, my * d_inv, mz * d_inv, gamma)) {
           d_av += d;
           vx_av += mx;
           vy_av += my;
@@ -1228,11 +1129,21 @@ __device__ void Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int
           }
 #endif
           N++;
+        } else if ((ii != i) || (jj != j) || (kk != k)) {
+#ifdef DE
+          Real Udens = conserved[grid_enum::GasEnergy * ncells + idn];
+#else
+          Real Udens =
+              -123456789;  // set to a dumb-looking number so that it's clear that it's not real when printing it
+#endif
+          printf("%3d %3d %3d skipped-neighbor: d: %e  E:%e  P:%e  vx:%e  vy:%e  vz:%e  Uadv:%e\n", ii, jj, kk, d, E, P,
+                 mx / d, my / d, mz / d, Udens);
         }
       }
     }
   }
 
+  // update the accumulator variables so that they now hold averages
   P_av  = P_av / N;
   vx_av = vx_av / d_av;
   vy_av = vy_av / d_av;
@@ -1242,17 +1153,18 @@ __device__ void Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int
     scalar_av[n] = scalar_av[n] / d_av;
   }
 #endif
-  d_av = d_av / N;
+  d_av          = d_av / N;
+  Real Udens_av = P_av / (gamma - 1.0);
+  Real E_av     = Udens_av + 0.5 * d_av * math_utils::SquareMagnitude(vx_av, vy_av, vz_av);
 
   // replace cell values with new averaged values
   conserved[id + ncells * grid_enum::density]    = d_av;
   conserved[id + ncells * grid_enum::momentum_x] = d_av * vx_av;
   conserved[id + ncells * grid_enum::momentum_y] = d_av * vy_av;
   conserved[id + ncells * grid_enum::momentum_z] = d_av * vz_av;
-  conserved[id + ncells * grid_enum::Energy] =
-      P_av / (gamma - 1.0) + 0.5 * d_av * (vx_av * vx_av + vy_av * vy_av + vz_av * vz_av);
+  conserved[id + ncells * grid_enum::Energy]     = E_av;
 #ifdef DE
-  conserved[id + ncells * grid_enum::GasEnergy] = P_av / (gamma - 1.0);
+  conserved[id + ncells * grid_enum::GasEnergy] = Udens_av;
 #endif
 #ifdef SCALAR
   for (int n = 0; n < NSCALARS; n++) {  // NOLINT
@@ -1260,11 +1172,12 @@ __device__ void Average_Cell_All_Fields(int i, int j, int k, int nx, int ny, int
   }
 #endif
 
-  d = d_av;
-  E = P_av / (gamma - 1.0) + 0.5 * d_av * (vx_av * vx_av + vy_av * vy_av + vz_av * vz_av);
-  P = P_av;
+  // print out the values now that they have been replaced
+  printf("%3d %3d %3d FC: d: %e  E:%e  P:%e  vx:%e  vy:%e  vz:%e  Udens:%e\n", i, j, k, d_av, E_av, P_av, vx_av, vy_av,
+         vz_av, Udens_av);
 
-  printf("%3d %3d %3d FC: d: %e  E:%e  P:%e  vx:%e  vy:%e  vz:%e\n", i, j, k, d, E, P, vx_av, vy_av, vz_av);
+  // success requires that at least 2 cells contributed to the average
+  return N > 1;
 }
 
 void Apply_Scalar_Floor(Real *dev_conserved, int nx, int ny, int nz, int n_ghost, int field_num, Real scalar_floor)
