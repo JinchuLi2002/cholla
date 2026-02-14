@@ -1,0 +1,10 @@
+{
+  "cholla_machine": "github",
+  "cuda_version": "",
+  "driver_version": "",
+  "gcc_version": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.2) 11.4.0",
+  "git_sha": "6751584b70c85b6797af924b5d5f869d00c2be66",
+  "gpu_name": "Field cuda_version is not a valid field to query.",
+  "nvidia_smi_summary": "name=Field cuda_version is not a valid field to query.;driver=;cuda=",
+  "os_release": "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\";NAME=\"Ubuntu\";VERSION=\"22.04.5 LTS (Jammy Jellyfish)\";"
+}

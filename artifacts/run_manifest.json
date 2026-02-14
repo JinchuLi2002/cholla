@@ -1,0 +1,39 @@
+{
+  "binary_path": "bin/cholla.cosmology.github",
+  "build_cmd": "CHOLLA_MACHINE=github make TYPE=cosmology -j2",
+  "build_command": "CHOLLA_MACHINE=github make TYPE=cosmology -j2",
+  "error": null,
+  "error_legacy": "",
+  "exit_code": 0,
+  "git_sha": "6751584b70c8",
+  "git_sha_short": "6751584b70c8",
+  "input_hash_sha256": "ab14588df653bbce081b2b28a1a68ccf86115c0b349566e2bca64767ce59a012",
+  "params_path": "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/params.run.txt",
+  "produced_files": [
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/0/0_gravity.h5.0",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/0/0.h5.0",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/0/0_particles.h5.0",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/params.run.txt",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/params.txt",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/README.snapshot.txt",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/run.log",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/scale_outputs.txt",
+    "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/validator.log"
+  ],
+  "run_cmd": "bin/cholla.cosmology.github runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/params.run.txt",
+  "run_dir": "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce",
+  "run_id": "6751584b70c8_ab14588df653bbce",
+  "run_log": "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/run.log",
+  "run_outdir": "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce",
+  "run_params": "runs/smoke_cosmo/6751584b70c8_ab14588df653bbce/params.run.txt",
+  "schedule_path": "tests/smoke_cosmo/scale_outputs.txt",
+  "status": "success",
+  "timestamp_utc": "2026-02-14T21:51:58Z",
+  "validation": {
+    "details": "python validator passed",
+    "status": "pass"
+  },
+  "validator_cmd": "python3 scripts/validate_smoke.py --run_dir runs/smoke_cosmo/6751584b70c8_ab14588df653bbce",
+  "validator_details": "python validator passed",
+  "validator_passed": true
+}
