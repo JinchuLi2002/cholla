@@ -236,6 +236,50 @@ write_manifest() {
   local ts_utc
   ts_utc="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+  local validation_global_path="artifacts/validation.json"
+  local validation_run_path=""
+  if [[ -n "${RUN_DIR}" ]]; then
+    validation_run_path="${RUN_DIR}/validator.json"
+  fi
+
+  if [[ ! -f "${validation_global_path}" ]]; then
+    local validation_status="fail"
+    if [[ "${VALIDATOR_PASSED}" == "true" ]]; then
+      validation_status="pass"
+    fi
+
+    VALIDATION_STATUS="${validation_status}" \
+    VALIDATION_DETAILS="${VALIDATOR_DETAILS}" \
+    VALIDATION_CMD="${VALIDATOR_CMD_USED}" \
+    VALIDATION_RUN_DIR="${RUN_DIR}" \
+    VALIDATION_RUN_LOG="${RUN_LOG}" \
+    VALIDATION_TIMESTAMP="${ts_utc}" \
+    VALIDATION_GLOBAL_PATH="${validation_global_path}" \
+    python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+payload = {
+    "run_dir": os.environ["VALIDATION_RUN_DIR"],
+    "run_log": os.environ["VALIDATION_RUN_LOG"],
+    "status": os.environ["VALIDATION_STATUS"],
+    "details": os.environ["VALIDATION_DETAILS"],
+    "validator_cmd": os.environ["VALIDATION_CMD"],
+    "timestamp": os.environ["VALIDATION_TIMESTAMP"],
+}
+
+path = Path(os.environ["VALIDATION_GLOBAL_PATH"])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+PY
+  fi
+
+  if [[ -n "${validation_run_path}" && -f "${validation_global_path}" ]]; then
+    mkdir -p "$(dirname "${validation_run_path}")"
+    cp "${validation_global_path}" "${validation_run_path}" || true
+  fi
+
   if [[ -n "${RUN_DIR}" ]]; then
     printf "%s\n" "${RUN_DIR}" > artifacts/last_run_dir.txt
   else
@@ -333,18 +377,66 @@ trap write_manifest EXIT
 run_validator() {
   local outdir="$1"
   local log_path="$2"
+  local validation_global_path="artifacts/validation.json"
+  local validation_run_path="${RUN_DIR}/validator.json"
+
+  write_validation_from_status() {
+    local status_str="fail"
+    if [[ "${VALIDATOR_PASSED}" == "true" ]]; then
+      status_str="pass"
+    fi
+
+    VALIDATION_STATUS="${status_str}" \
+    VALIDATION_DETAILS="${VALIDATOR_DETAILS}" \
+    VALIDATION_CMD="${VALIDATOR_CMD_USED}" \
+    VALIDATION_RUN_DIR="${outdir}" \
+    VALIDATION_RUN_LOG="${log_path}" \
+    VALIDATION_GLOBAL_PATH="${validation_global_path}" \
+    VALIDATION_RUN_PATH="${validation_run_path}" \
+    python3 - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+payload = {
+    "run_dir": os.environ["VALIDATION_RUN_DIR"],
+    "run_log": os.environ["VALIDATION_RUN_LOG"],
+    "status": os.environ["VALIDATION_STATUS"],
+    "details": os.environ["VALIDATION_DETAILS"],
+    "validator_cmd": os.environ["VALIDATION_CMD"],
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+}
+
+global_path = Path(os.environ["VALIDATION_GLOBAL_PATH"])
+run_path = Path(os.environ["VALIDATION_RUN_PATH"])
+global_path.parent.mkdir(parents=True, exist_ok=True)
+run_path.parent.mkdir(parents=True, exist_ok=True)
+encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+global_path.write_text(encoded)
+run_path.write_text(encoded)
+PY
+  }
+
+  rm -f "${validation_global_path}" "${validation_run_path}"
 
   if [[ -f scripts/validate_smoke.py ]]; then
-    VALIDATOR_CMD_USED="python3 scripts/validate_smoke.py --run_dir ${outdir}"
-    if python3 scripts/validate_smoke.py --run_dir "${outdir}" >"${RUN_DIR}/validator.log" 2>&1; then
+    VALIDATOR_CMD_USED="python3 scripts/validate_smoke.py --run_dir ${outdir} --out ${validation_global_path}"
+    if python3 scripts/validate_smoke.py --run_dir "${outdir}" --out "${validation_global_path}" >"${RUN_DIR}/validator.log" 2>&1; then
       VALIDATOR_PASSED="true"
       VALIDATOR_DETAILS="python validator passed"
-      return 0
     else
       VALIDATOR_PASSED="false"
       VALIDATOR_DETAILS="python validator failed; see ${RUN_DIR}/validator.log and artifacts/validation.json"
-      return 1
     fi
+
+    if [[ -f "${validation_global_path}" ]]; then
+      cp "${validation_global_path}" "${validation_run_path}"
+    else
+      write_validation_from_status
+    fi
+
+    [[ "${VALIDATOR_PASSED}" == "true" ]] && return 0 || return 1
   fi
 
   if [[ -x tests/smoke_cosmo/validate_smoke.sh ]]; then
@@ -352,10 +444,12 @@ run_validator() {
     if tests/smoke_cosmo/validate_smoke.sh "${outdir}" >"${RUN_DIR}/validator.log" 2>&1; then
       VALIDATOR_PASSED="true"
       VALIDATOR_DETAILS="external shell validator passed"
+      write_validation_from_status
       return 0
     else
       VALIDATOR_PASSED="false"
       VALIDATOR_DETAILS="external shell validator failed; see ${RUN_DIR}/validator.log"
+      write_validation_from_status
       return 1
     fi
   fi
@@ -365,10 +459,12 @@ run_validator() {
     if python3 tests/smoke_cosmo/validate_smoke.py "${outdir}" >"${RUN_DIR}/validator.log" 2>&1; then
       VALIDATOR_PASSED="true"
       VALIDATOR_DETAILS="external python validator passed"
+      write_validation_from_status
       return 0
     else
       VALIDATOR_PASSED="false"
       VALIDATOR_DETAILS="external python validator failed; see ${RUN_DIR}/validator.log"
+      write_validation_from_status
       return 1
     fi
   fi
@@ -380,11 +476,13 @@ run_validator() {
   if [[ "${snapshot_count}" -ge 1 ]] && grep -q "Saving Snapshot" "${log_path}" 2>/dev/null; then
     VALIDATOR_PASSED="true"
     VALIDATOR_DETAILS="builtin validator passed (found ${snapshot_count} output files and snapshot log markers)"
+    write_validation_from_status
     return 0
   fi
 
   VALIDATOR_PASSED="false"
   VALIDATOR_DETAILS="builtin validator failed (found ${snapshot_count} output files)"
+  write_validation_from_status
   return 1
 }
 

@@ -113,6 +113,11 @@ def validate(run_dir: Path, repo_root: Path) -> tuple[bool, dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate cosmology smoke outputs.")
     parser.add_argument("--run_dir", required=True, help="Run directory to validate.")
+    parser.add_argument(
+        "--out",
+        default="",
+        help="Optional output JSON path. Defaults to artifacts/validation.json under repo root.",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -122,9 +127,16 @@ def main() -> int:
 
     ok, payload = validate(run_dir=run_dir, repo_root=repo_root)
 
-    artifacts_dir = repo_root / "artifacts"
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    validation_path = artifacts_dir / "validation.json"
+    if args.out:
+        validation_path = Path(args.out)
+        if not validation_path.is_absolute():
+            validation_path = (Path.cwd() / validation_path).resolve()
+    else:
+        artifacts_dir = repo_root / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        validation_path = artifacts_dir / "validation.json"
+
+    validation_path.parent.mkdir(parents=True, exist_ok=True)
     validation_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
     if ok:
