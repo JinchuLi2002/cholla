@@ -28,6 +28,8 @@ STEP_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 STATE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("current_a", re.compile(rf"\bcurrent[_\-\s]*a\s*(?:=|:)\s*({FLOAT_TOKEN})\b", re.IGNORECASE)),
+    ("current_z", re.compile(rf"\bcurrent[_\-\s]*z\s*(?:=|:)\s*({FLOAT_TOKEN})\b", re.IGNORECASE)),
     ("a", re.compile(rf"\ba\s*(?:=|:)\s*({FLOAT_TOKEN})\b", re.IGNORECASE)),
     ("z", re.compile(rf"\bz\s*(?:=|:)\s*({FLOAT_TOKEN})\b", re.IGNORECASE)),
     ("t", re.compile(rf"\bt\s*(?:=|:)\s*({FLOAT_TOKEN})\b", re.IGNORECASE)),
@@ -127,10 +129,19 @@ def _parse_scalar_from_log(run_log: Path) -> tuple[str, int | float] | None:
     text = run_log.read_text(encoding="utf-8", errors="replace")
 
     step_value = _extract_last_match(text, STEP_PATTERNS, int)
+    state_value = _extract_last_match(text, STATE_PATTERNS, float)
+
     if step_value is not None:
+        _step_field, step_scalar = step_value
+        # For tiny smoke runs with tout=0/outstep=0, step counters are often
+        # deterministically zero. In that case, prefer a final state signal
+        # (Current_z/Current_a/a/z/t) to preserve dynamic range across params.
+        if step_scalar > 0:
+            return step_value
+        if state_value is not None:
+            return state_value
         return step_value
 
-    state_value = _extract_last_match(text, STATE_PATTERNS, float)
     if state_value is not None:
         return state_value
 
