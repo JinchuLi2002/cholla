@@ -9,6 +9,7 @@ description: >
 
 parameters:
   - name: nx
+    params_key: nx
     type: int
     default: 8
     bounds:
@@ -18,6 +19,7 @@ parameters:
     notes: Grid size in x. Kept small to preserve short smoke runtime.
 
   - name: ny
+    params_key: ny
     type: int
     default: 8
     bounds:
@@ -27,6 +29,7 @@ parameters:
     notes: Grid size in y. Keep aligned with nx/nz for stable tiny-box sweeps.
 
   - name: nz
+    params_key: nz
     type: int
     default: 8
     bounds:
@@ -36,6 +39,7 @@ parameters:
     notes: Grid size in z. Upper bound chosen to keep total cells small.
 
   - name: gamma
+    params_key: gamma
     type: float
     default: 1.66666667
     bounds:
@@ -44,14 +48,16 @@ parameters:
     notes: Hydro adiabatic index; must remain > 1.0.
 
   - name: Init_redshift
+    params_key: Init_redshift
     type: float
     default: 0.0
     bounds:
       min: 0.0
-      max: 2.0
-    notes: Cosmology initialization redshift for short smoke exploration.
+      max: 0.5
+    notes: Narrowed in Phase 1 to reduce low-value exploration noise.
 
   - name: H0
+    params_key: H0
     type: float
     default: 67.66
     bounds:
@@ -60,6 +66,7 @@ parameters:
     notes: Hubble parameter used by cosmology initialization.
 
   - name: Omega_M
+    params_key: Omega_M
     type: float
     default: 0.3111
     bounds:
@@ -68,6 +75,7 @@ parameters:
     notes: Matter density parameter; constrained with Omega_L and Omega_b.
 
   - name: Omega_L
+    params_key: Omega_L
     type: float
     default: 0.6889
     bounds:
@@ -91,12 +99,36 @@ global_safety:
     - name: max_total_cells
       expr: "nx * ny * nz <= 4096"
       reason: Prevent long runtimes and oversized smoke outputs.
+    - name: cubic_grid_only
+      expr: "nx == ny and ny == nz"
+      reason: Reduce sweep entropy in Phase 1 and keep geometry consistent.
     - name: gamma_positive_constraint
       expr: "gamma > 1.0"
       reason: Required by runtime checks in initial condition setup.
     - name: omega_sum_near_unity
-      expr: "0.95 <= (Omega_M + Omega_L) <= 1.05"
+      expr: "abs(Omega_M + Omega_L - 1.0) <= 0.05"
       reason: Keep cosmology parameters physically consistent for smoke runs.
     - name: positive_omega_b_less_than_matter
       expr: "0.0 < Omega_b <= Omega_M"
       reason: Preserve a physically plausible baryon fraction.
+
+key_mapping:
+  params_template: tests/smoke_cosmo/params.txt
+  sweep_keys:
+    - nx
+    - ny
+    - nz
+    - gamma
+    - Init_redshift
+    - H0
+    - Omega_M
+    - Omega_L
+  fixed_keys:
+    - tout
+    - outstep
+    - init
+    - Omega_b
+    - scale_outputs_file
+    - n_proc_x
+    - n_proc_y
+    - n_proc_z
