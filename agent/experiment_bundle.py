@@ -48,11 +48,14 @@ def _best_from_history(records: list[dict[str, Any]]) -> tuple[dict[str, Any] | 
         metric = record.get("metric", {})
         if not isinstance(metric, dict):
             continue
-        value = metric.get("value")
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        scalar_value = metric.get("scalar")
+        if scalar_value is None:
+            # Backward-compatibility for older bundles that only stored `value`.
+            scalar_value = metric.get("value")
+        if not isinstance(scalar_value, (int, float)) or isinstance(scalar_value, bool):
             continue
 
-        scalar = float(value)
+        scalar = float(scalar_value)
         if best_scalar is None or scalar > best_scalar:
             best_scalar = scalar
             best_record = record

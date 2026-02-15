@@ -13,10 +13,11 @@ import numpy as np
 
 
 SNAPSHOT_FILE_RE = re.compile(r".*\.(?:h5|hdf5)(?:\.\d+)?$", re.IGNORECASE)
-COMMON_DENSITY_DATASETS = (
-    "density",
-    "gas_density",
-    "d_density",
+DENSITY_EXACT_DATASETS = ("density", "rho")
+VELOCITY_COMPONENT_ALIASES = (
+    ("vx", "vel_x"),
+    ("vy", "vel_y"),
+    ("vz", "vel_z"),
 )
 CURRENT_Z_REGEXES = (
     re.compile(r"Current_z\s*[:=]\s*([+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)"),
@@ -91,32 +92,47 @@ def _ordered_unique(paths: list[Path]) -> list[Path]:
 
 def _find_snapshot(run_dir: Path, manifest: dict[str, Any]) -> Path | None:
     manifest_candidates = _manifest_snapshot_candidates(run_dir, manifest)
-    first_manifest = [p for p in manifest_candidates if p.name == "0.h5.0"]
-    other_manifest = [p for p in manifest_candidates if p.name != "0.h5.0"]
-
-    first_glob = _glob_snapshot_candidates(run_dir, ("0/0.h5.0", "**/0.h5.0"))
-    other_glob = _glob_snapshot_candidates(
+    glob_candidates = _glob_snapshot_candidates(
         run_dir,
         ("**/*.h5.*", "**/*.h5", "**/*.hdf5.*", "**/*.hdf5"),
     )
 
-    candidates = _ordered_unique(first_manifest + first_glob + other_manifest + other_glob)
+    candidates = _ordered_unique(manifest_candidates + glob_candidates)
     if not candidates:
         return None
-    return candidates[0]
+    ordered = sorted(candidates, key=lambda p: (p.name.lower(), str(p)))
+    return ordered[-1]
+
+
+def _dataset_basename(dataset_name: str) -> str:
+    stripped = dataset_name.lstrip("/")
+    return stripped.rsplit("/", 1)[-1].lower()
 
 
 def _pick_density_dataset(dataset_names: list[str]) -> str | None:
-    normalized = {name.lstrip("/"): name for name in dataset_names}
+    exact = sorted(name for name in dataset_names if _dataset_basename(name) in DENSITY_EXACT_DATASETS)
+    if exact:
+        return exact[0]
 
-    for key in COMMON_DENSITY_DATASETS:
-        if key in normalized:
-            return normalized[key]
-
-    containing_density = sorted(name for name in dataset_names if "density" in name.lower())
+    containing_density = sorted(
+        name
+        for name in dataset_names
+        if "density" in _dataset_basename(name) or "density" in name.lower()
+    )
     if containing_density:
         return containing_density[0]
     return None
+
+
+def _pick_velocity_datasets(dataset_names: list[str]) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for aliases in VELOCITY_COMPONENT_ALIASES:
+        key = aliases[0]
+        candidates = sorted(name for name in dataset_names if _dataset_basename(name) in aliases)
+        if not candidates:
+            return {}
+        selected[key] = candidates[0]
+    return selected
 
 
 def _extract_last_value(text: str, patterns: tuple[re.Pattern[str], ...], caster: type[float] | type[int]) -> float | int | None:
@@ -176,20 +192,55 @@ def _metric_from_hdf5(snapshot_path: Path) -> dict[str, Any]:
                 f"{snapshot_path} (datasets={dataset_names})"
             )
 
-        values = np.asarray(h5f[dataset_name][...], dtype=np.float64)
-        mean = float(values.mean())
-        var = float(values.var())
-        scalar = float(mean + var)
+        rho_values = np.asarray(h5f[dataset_name][...], dtype=np.float64)
+        mass = float(rho_values.sum())
+        rho_var = float(rho_values.var())
+
+        if not np.isfinite(mass):
+            raise RuntimeError(f"metric_v2: non-finite density mass sum in {snapshot_path}")
+        if mass == 0.0:
+            raise RuntimeError(
+                "metric_v2: density mass sum is zero; refusing trivial metric "
+                f"(snapshot={snapshot_path}, dataset=/{dataset_name.lstrip('/')})"
+            )
+        if not np.isfinite(rho_var):
+            raise RuntimeError(f"metric_v2: non-finite density variance in {snapshot_path}")
+
+        velocity_datasets = _pick_velocity_datasets(dataset_names)
+        v_mean: float | None = None
+        velocity_used = False
+        if velocity_datasets:
+            vx_values = np.asarray(h5f[velocity_datasets["vx"]][...], dtype=np.float64)
+            vy_values = np.asarray(h5f[velocity_datasets["vy"]][...], dtype=np.float64)
+            vz_values = np.asarray(h5f[velocity_datasets["vz"]][...], dtype=np.float64)
+
+            if vx_values.shape == vy_values.shape == vz_values.shape:
+                speeds = np.sqrt(vx_values * vx_values + vy_values * vy_values + vz_values * vz_values)
+                v_mean = float(speeds.mean())
+                if not np.isfinite(v_mean):
+                    raise RuntimeError(f"metric_v2: non-finite velocity mean in {snapshot_path}")
+                velocity_used = True
+            else:
+                velocity_datasets = {}
+
+        scalar = float(v_mean if velocity_used and v_mean is not None else rho_var)
 
     return {
         "metric_name": "density_mean_var_v2",
         "scalar": scalar,
         "metric_value": scalar,
-        "mean": mean,
-        "var": var,
+        "mass": mass,
+        "rho_var": rho_var,
+        "v_mean": v_mean,
+        "velocity_used": velocity_used,
         "source": "hdf5",
         "snapshot_path": str(snapshot_path),
-        "dataset_path": f"/{dataset_name.lstrip('/')}",
+        "density_dataset_path": f"/{dataset_name.lstrip('/')}",
+        "velocity_dataset_paths": (
+            {axis: f"/{path.lstrip('/')}" for axis, path in velocity_datasets.items()}
+            if velocity_datasets
+            else {}
+        ),
     }
 
 
@@ -209,10 +260,14 @@ def _metric_from_log(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             "metric_name": "density_mean_var_v2",
             "scalar": float(current_z),
             "metric_value": float(current_z),
-            "mean": None,
-            "var": None,
+            "mass": None,
+            "rho_var": None,
+            "v_mean": None,
+            "velocity_used": False,
             "source": "log",
             "snapshot_path": "",
+            "density_dataset_path": "",
+            "velocity_dataset_paths": {},
             "log_path": str(run_log),
             "log_signal": "Current_z",
         }
@@ -223,10 +278,14 @@ def _metric_from_log(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             "metric_name": "density_mean_var_v2",
             "scalar": float(n_step),
             "metric_value": float(n_step),
-            "mean": None,
-            "var": None,
+            "mass": None,
+            "rho_var": None,
+            "v_mean": None,
+            "velocity_used": False,
             "source": "log",
             "snapshot_path": "",
+            "density_dataset_path": "",
+            "velocity_dataset_paths": {},
             "log_path": str(run_log),
             "log_signal": "n_step",
         }
@@ -241,8 +300,11 @@ def compute_metric(run_dir: str, manifest_path: str | None = None) -> dict[str, 
     """Compute deterministic scalar metric from run outputs.
 
     Preference order:
-    1) First snapshot HDF5 file under run_dir (or manifest produced_files), using
-       density data mean/variance.
+    1) Last snapshot HDF5 file under run_dir (or manifest produced_files), sorted
+       by filename.
+       - Always compute: density mass sum and density variance.
+       - If velocity components exist, scalar is mean(|v|); otherwise scalar is
+         density variance.
     2) run.log fallback (final Current_z, then final n_step).
     """
 

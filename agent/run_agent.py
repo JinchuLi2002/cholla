@@ -567,7 +567,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": {},
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "value": None, "path": ""},
+                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
                 "resources": {"walltime_sec": None, "output_bytes": None},
                 "status": "failed",
                 "manifest_path": "",
@@ -613,7 +613,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": validated,
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "value": None, "path": ""},
+                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
                 "resources": {"walltime_sec": None, "output_bytes": None},
                 "status": "failed",
                 "manifest_path": "",
@@ -666,7 +666,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": validated,
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "value": None, "path": ""},
+                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
                 "resources": _resources_from_execution_record(execution_record),
                 "status": "failed",
                 "manifest_path": manifest_path,
@@ -699,6 +699,12 @@ def main() -> int:
 
         run_id = _run_id_from_records(execution_record, manifest)
         status = _status_from_records(validated, execution_record, manifest)
+        scalar_raw = metric_payload.get("scalar", metric_payload.get("metric_value"))
+        metric_scalar = (
+            float(scalar_raw)
+            if isinstance(scalar_raw, (int, float)) and not isinstance(scalar_raw, bool)
+            else None
+        )
 
         history_record = {
             "record_type": "iteration",
@@ -710,8 +716,11 @@ def main() -> int:
             "RUN_ID": run_id,
             "metric": {
                 "name": metric_payload.get("metric_name"),
-                "value": metric_payload.get("scalar", metric_payload.get("metric_value")),
+                "scalar": metric_scalar,
+                "value": metric_scalar,
                 "path": str(metric_path),
+                "source": metric_payload.get("source"),
+                "snapshot_path": metric_payload.get("snapshot_path", ""),
             },
             "resources": _resources_from_execution_record(execution_record),
             "status": status,
@@ -722,9 +731,8 @@ def main() -> int:
 
         if status == "success":
             success_count += 1
-            scalar_raw = metric_payload.get("scalar", metric_payload.get("metric_value"))
-            if isinstance(scalar_raw, (int, float)):
-                successful_metric_scalars.append(float(scalar_raw))
+            if metric_scalar is not None:
+                successful_metric_scalars.append(metric_scalar)
         else:
             failed_count += 1
             iteration_failed = True
