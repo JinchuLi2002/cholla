@@ -1,0 +1,12 @@
+{
+  "agent_run_id": "colab_exec_demo_3iters",
+  "backend_run_dir": "/content/cholla/r/0a168bda/i0/a0ea428d4aaa_smoke_cosmo_2323d7e33aeadbb9",
+  "iteration": 0,
+  "metric_name": "snapshot_file_count",
+  "metric_value": 3,
+  "snapshot_files": [
+    "0/0.h5.0",
+    "0/0_gravity.h5.0",
+    "0/0_particles.h5.0"
+  ]
+}

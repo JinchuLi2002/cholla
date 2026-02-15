@@ -1,0 +1,26 @@
+{
+  "checked_patterns": {
+    "data_file_patterns": [
+      "**/*.h5.*"
+    ],
+    "first_snapshot_patterns": [
+      "0/0.h5.0",
+      "**/0.h5.0"
+    ]
+  },
+  "found": {
+    "data_files": [
+      "r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e/0/0.h5.0",
+      "r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e/0/0_gravity.h5.0",
+      "r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e/0/0_particles.h5.0"
+    ],
+    "first_snapshot_files": [
+      "r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e/0/0.h5.0"
+    ]
+  },
+  "missing": [],
+  "run_dir": "/content/cholla/r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e",
+  "run_log": "/content/cholla/r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e/run.log",
+  "status": "pass",
+  "timestamp": "2026-02-15T01:02:20.000120+00:00"
+}

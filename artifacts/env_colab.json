@@ -1,10 +1,10 @@
 {
   "cholla_machine": "github",
-  "cuda_version": "",
-  "driver_version": "",
+  "cuda_version": "13.0",
+  "driver_version": "580.82.07",
   "gcc_version": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.2) 11.4.0",
-  "git_sha": "6751584b70c85b6797af924b5d5f869d00c2be66",
-  "gpu_name": "Field cuda_version is not a valid field to query.",
-  "nvidia_smi_summary": "name=Field cuda_version is not a valid field to query.;driver=;cuda=",
+  "git_sha": "29d9ba05d3115b84cd959ce57f65bd5ffd1cc94e",
+  "gpu_name": "Tesla T4",
+  "nvidia_smi_summary": "Sun Feb 15 01:16:39 2026       ;+-----------------------------------------------------------------------------------------+;| NVIDIA-SMI 580.82.07              Driver Version: 580.82.07      CUDA Version: 13.0     |;+-----------------------------------------+------------------------+----------------------+;| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |;| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |;|                                         |                        |               MIG M. |;|=========================================+========================+======================|;|   0  Tesla T4                       Off |   00000000:00:04.0 Off |                    0 |;| N/A   42C    P0             28W /   70W |       0MiB /  15360MiB |      2%      Default |;|                                         |                        |                  N/A |;+-----------------------------------------+------------------------+----------------------+;;+-----------------------------------------------------------------------------------------+;| Processes:                                                                              |;|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |;|        ID   ID                                                               Usage      |;|=========================================================================================|;|  No running processes found                                                             |;+-----------------------------------------------------------------------------------------+",
   "os_release": "PRETTY_NAME=\"Ubuntu 22.04.5 LTS\";NAME=\"Ubuntu\";VERSION=\"22.04.5 LTS (Jammy Jellyfish)\";"
 }

@@ -1,0 +1,12 @@
+{
+  "agent_run_id": "tier4_demo_repeat",
+  "backend_run_dir": "/content/cholla/r/9610bce7/i2/29d9ba05d311_smoke_cosmo_27775db9389731e8",
+  "iteration": 2,
+  "metric_name": "snapshot_file_count",
+  "metric_value": 3,
+  "snapshot_files": [
+    "0/0.h5.0",
+    "0/0_gravity.h5.0",
+    "0/0_particles.h5.0"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "agent_run_id": "colab_exec_demo_3iters",
+  "backend": {
+    "command": [
+      "bash",
+      "scripts/colab_smoke.sh",
+      "--params",
+      "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/inputs/params.txt",
+      "--schedule",
+      "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/inputs/scale_outputs.txt",
+      "--out-root",
+      "/content/cholla/r/0a168bda/i1"
+    ],
+    "returncode": 0
+  },
+  "iteration": 1,
+  "paths": {
+    "backend_run_dir": "/content/cholla/r/0a168bda/i1/a0ea428d4aaa_smoke_cosmo_071c8efc8fbac48e",
+    "iter_out_root": "/content/cholla/r/0a168bda/i1",
+    "iteration_dir": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1",
+    "last_run_dir_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/artifacts/last_run_dir.txt",
+    "run_local_params_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/inputs/params.txt",
+    "run_local_schedule_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/inputs/scale_outputs.txt",
+    "run_manifest_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/artifacts/run_manifest.json",
+    "stderr_log_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/logs/execute_run.stderr.log",
+    "stdout_log_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/logs/execute_run.stdout.log",
+    "template_params_path": "/content/cholla/tests/smoke_cosmo/params.txt",
+    "template_schedule_path": "/content/cholla/tests/smoke_cosmo/scale_outputs.txt",
+    "validation_path": "/content/cholla/agent/runs/colab_exec_demo_3iters/iter_1/artifacts/validation.json"
+  },
+  "proposed_params": {
+    "H0": 69.05289916,
+    "Init_redshift": 0.04059268,
+    "Omega_L": 0.67308949,
+    "Omega_M": 0.31305877,
+    "gamma": 1.12462244,
+    "nx": 8,
+    "ny": 8,
+    "nz": 8
+  },
+  "seed": 123,
+  "status": {
+    "manifest_status": "success",
+    "template_unchanged": true,
+    "validation_status": "pass"
+  }
+}
