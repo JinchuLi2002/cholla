@@ -15,7 +15,9 @@ import yaml
 
 from execute_run import _render_params, execute_run
 from experiment_bundle import derive_experiment_id, write_experiment_bundle
-from metric_v2 import compute_metric
+from metric_v2 import compute_metric as compute_metric_v2
+from metric_v3 import METRIC_NAME as METRIC_NAME_V3
+from metric_v3 import compute_metric as compute_metric_v3
 from propose_params import propose
 from validate_params import ValidationError, validate_params
 
@@ -382,6 +384,18 @@ def _guardrail_termination_reason(
     return ""
 
 
+def _metric_name_from_choice(metric_choice: str) -> str:
+    if metric_choice == "v3":
+        return METRIC_NAME_V3
+    return "density_mean_var_v2"
+
+
+def _metric_fn_from_choice(metric_choice: str) -> Any:
+    if metric_choice == "v3":
+        return compute_metric_v3
+    return compute_metric_v2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run deterministic Tier-4 agent loop.")
     parser.add_argument("--seed", type=int, default=None, help="Deterministic seed.")
@@ -457,6 +471,13 @@ def main() -> int:
         default=3,
         help="Maximum allowed failures before stopping. Stops when failures > max_failures.",
     )
+    parser.add_argument(
+        "--metric",
+        type=str,
+        choices=("v2", "v3"),
+        default="v3",
+        help="Metric implementation version (default: v3).",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -506,7 +527,10 @@ def main() -> int:
         "convergence_tol": args.convergence_tol,
         "max_total_runs": args.max_total_runs,
         "max_failures": args.max_failures,
+        "metric": args.metric,
     }
+    selected_metric_name = _metric_name_from_choice(args.metric)
+    metric_compute_fn = _metric_fn_from_choice(args.metric)
 
     if max_total_runs < 1:
         print("RUN_AGENT_ERROR: --max-total-runs must be >= 1", file=sys.stderr)
@@ -567,7 +591,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": {},
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
+                "metric": {"name": selected_metric_name, "scalar": None, "value": None, "path": ""},
                 "resources": {"walltime_sec": None, "output_bytes": None},
                 "status": "failed",
                 "manifest_path": "",
@@ -613,7 +637,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": validated,
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
+                "metric": {"name": selected_metric_name, "scalar": None, "value": None, "path": ""},
                 "resources": {"walltime_sec": None, "output_bytes": None},
                 "status": "failed",
                 "manifest_path": "",
@@ -651,7 +675,7 @@ def main() -> int:
             manifest_path = ""
 
         try:
-            metric_payload = compute_metric(
+            metric_payload = metric_compute_fn(
                 run_dir=backend_run_dir,
                 manifest_path=manifest_path or None,
             )
@@ -666,7 +690,7 @@ def main() -> int:
                 "seed": args.seed,
                 "params": validated,
                 "RUN_ID": "",
-                "metric": {"name": "density_mean_var_v2", "scalar": None, "value": None, "path": ""},
+                "metric": {"name": selected_metric_name, "scalar": None, "value": None, "path": ""},
                 "resources": _resources_from_execution_record(execution_record),
                 "status": "failed",
                 "manifest_path": manifest_path,
@@ -705,6 +729,9 @@ def main() -> int:
             if isinstance(scalar_raw, (int, float)) and not isinstance(scalar_raw, bool)
             else None
         )
+        metric_name = metric_payload.get("metric_name")
+        if not isinstance(metric_name, str) or not metric_name:
+            metric_name = selected_metric_name
 
         history_record = {
             "record_type": "iteration",
@@ -715,7 +742,7 @@ def main() -> int:
             "params": validated,
             "RUN_ID": run_id,
             "metric": {
-                "name": metric_payload.get("metric_name"),
+                "name": metric_name,
                 "scalar": metric_scalar,
                 "value": metric_scalar,
                 "path": str(metric_path),
@@ -785,6 +812,7 @@ def main() -> int:
         "history_path": _path_for_bundle(repo_root, history_path),
         "max_total_runs": max_total_runs,
         "max_failures": args.max_failures,
+        "metric": args.metric,
         "stop_on_converged": args.stop_on_converged,
         "convergence_window": args.convergence_window,
         "convergence_tol": args.convergence_tol,
@@ -795,7 +823,7 @@ def main() -> int:
         "cli_args": cli_args_payload,
         "effective_args": effective_args_payload,
         "metric": {
-            "name": "density_mean_var_v2",
+            "name": selected_metric_name,
             "objective": "maximize_scalar",
             "best_selection_rule": "max_scalar_tie_breaker=earliest_iteration",
         },
