@@ -197,16 +197,22 @@ def _metric_from_hdf5(snapshot_path: Path) -> dict[str, Any]:
             )
 
         rho_values = np.asarray(h5f[dataset_name][...], dtype=np.float64)
-        mass = float(rho_values.sum())
-        rho_var = float(rho_values.var())
+        if rho_values.size == 0:
+            raise RuntimeError(f"metric_v2: density dataset is empty in {snapshot_path}")
+
+        rho_finite = rho_values[np.isfinite(rho_values)]
+        finite_fraction = float(rho_finite.size / rho_values.size)
+        if rho_finite.size == 0:
+            raise RuntimeError(f"metric_v2: density dataset has no finite values in {snapshot_path}")
+
+        mass = float(rho_finite.sum())
+        rho_abs_sum = float(np.abs(rho_finite).sum())
+        rho_var = float(rho_finite.var())
 
         if not np.isfinite(mass):
             raise RuntimeError(f"metric_v2: non-finite density mass sum in {snapshot_path}")
-        if mass == 0.0:
-            raise RuntimeError(
-                "metric_v2: density mass sum is zero; refusing trivial metric "
-                f"(snapshot={snapshot_path}, dataset=/{dataset_name.lstrip('/')})"
-            )
+        if not np.isfinite(rho_abs_sum):
+            raise RuntimeError(f"metric_v2: non-finite density abs-sum in {snapshot_path}")
         if not np.isfinite(rho_var):
             raise RuntimeError(f"metric_v2: non-finite density variance in {snapshot_path}")
 
@@ -220,20 +226,28 @@ def _metric_from_hdf5(snapshot_path: Path) -> dict[str, Any]:
 
             if vx_values.shape == vy_values.shape == vz_values.shape:
                 speeds = np.sqrt(vx_values * vx_values + vy_values * vy_values + vz_values * vz_values)
-                v_mean = float(speeds.mean())
-                if not np.isfinite(v_mean):
-                    raise RuntimeError(f"metric_v2: non-finite velocity mean in {snapshot_path}")
-                velocity_used = True
+                finite_speeds = speeds[np.isfinite(speeds)]
+                if finite_speeds.size > 0:
+                    v_mean = float(finite_speeds.mean())
+                    velocity_used = True
+                else:
+                    velocity_datasets = {}
             else:
                 velocity_datasets = {}
 
+        degenerate = bool(rho_abs_sum == 0.0 and (not velocity_used) and rho_var == 0.0)
         scalar = float(v_mean if velocity_used and v_mean is not None else rho_var)
+        if degenerate:
+            scalar = 0.0
 
     return {
         "metric_name": "density_mean_var_v2",
         "scalar": scalar,
         "metric_value": scalar,
         "mass": mass,
+        "rho_abs_sum": rho_abs_sum,
+        "finite_fraction": finite_fraction,
+        "degenerate": degenerate,
         "rho_var": rho_var,
         "v_mean": v_mean,
         "velocity_used": velocity_used,
@@ -265,6 +279,9 @@ def _metric_from_log(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             "scalar": float(current_z),
             "metric_value": float(current_z),
             "mass": None,
+            "rho_abs_sum": None,
+            "finite_fraction": None,
+            "degenerate": False,
             "rho_var": None,
             "v_mean": None,
             "velocity_used": False,
@@ -283,6 +300,9 @@ def _metric_from_log(run_dir: Path, manifest: dict[str, Any]) -> dict[str, Any]:
             "scalar": float(n_step),
             "metric_value": float(n_step),
             "mass": None,
+            "rho_abs_sum": None,
+            "finite_fraction": None,
+            "degenerate": False,
             "rho_var": None,
             "v_mean": None,
             "velocity_used": False,
