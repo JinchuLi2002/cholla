@@ -56,6 +56,7 @@ disk.*
 # Python Related #
 ##################
 uv.lock
+*.ipynb
 .ipynb_checkpoints
 
 # Packages #

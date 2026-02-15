@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,21 @@ def _load_json(path: Path) -> dict[str, Any]:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _sum_file_sizes(root: Path) -> int:
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_file():
+            try:
+                total += path.stat().st_size
+            except OSError:
+                # Best-effort accounting: ignore files that disappear during traversal.
+                continue
+    return total
 
 
 def _run_iteration_validator(
@@ -212,6 +228,7 @@ def execute_run(
         str(iter_out_root),
     ]
 
+    t0 = time.time()
     proc = subprocess.run(
         cmd,
         cwd=repo_root,
@@ -219,6 +236,8 @@ def execute_run(
         capture_output=True,
         check=False,
     )
+    t1 = time.time()
+    walltime_sec = float(t1 - t0)
 
     stdout_log = logs_dir / "execute_run.stdout.log"
     stderr_log = logs_dir / "execute_run.stderr.log"
@@ -239,6 +258,11 @@ def execute_run(
         run_dir = last_run_dir_dst.read_text(encoding="utf-8").strip()
     if not run_dir and has_manifest:
         run_dir = str(_load_json(manifest_dst).get("run_dir", ""))
+
+    run_dir_path: Path | None = Path(run_dir) if run_dir else None
+    if run_dir_path is not None and not run_dir_path.is_absolute():
+        run_dir_path = (repo_root / run_dir_path).resolve()
+    output_bytes = _sum_file_sizes(run_dir_path) if run_dir_path is not None else _sum_file_sizes(iter_out_root)
 
     template_hash_after = _sha256_path(template_params_path)
     template_unchanged = template_hash_before == template_hash_after
@@ -278,6 +302,10 @@ def execute_run(
         "backend": {
             "command": cmd,
             "returncode": proc.returncode,
+        },
+        "resources": {
+            "walltime_sec": walltime_sec,
+            "output_bytes": output_bytes,
         },
         "status": {
             "template_unchanged": template_unchanged,
