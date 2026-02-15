@@ -23,6 +23,12 @@ def _sha256_path(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _short_backend_out_root(repo_root: Path, agent_run_id: str, iteration: int) -> Path:
+    """Return a compact backend out-root to avoid long path overflows in Cholla."""
+    digest = hashlib.sha256(agent_run_id.encode("utf-8")).hexdigest()[:8]
+    return repo_root / "r" / digest / f"i{iteration}"
+
+
 def _format_value(value: Any) -> str:
     if isinstance(value, bool):
         return "1" if value else "0"
@@ -100,7 +106,7 @@ def execute_run(
     inputs_dir = iter_dir / "inputs"
     logs_dir = iter_dir / "logs"
     artifacts_dir = iter_dir / "artifacts"
-    iter_out_root = iter_dir / "backend_runs"
+    iter_out_root = _short_backend_out_root(repo_root, agent_run_id, iteration)
     inputs_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
