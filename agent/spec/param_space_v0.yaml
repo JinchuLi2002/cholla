@@ -1,0 +1,102 @@
+version: 0
+name: tier4_smoke_param_space_v0
+format: cholla_params_kv
+template_params_path: tests/smoke_cosmo/params.txt
+description: >
+  Runtime-safe sweep space for Tier 4 short cosmology smoke loops. Parameters
+  map directly to existing key=value entries in params.txt and do not require
+  recompilation.
+
+parameters:
+  - name: nx
+    type: int
+    default: 8
+    bounds:
+      min: 8
+      max: 16
+      step: 2
+    notes: Grid size in x. Kept small to preserve short smoke runtime.
+
+  - name: ny
+    type: int
+    default: 8
+    bounds:
+      min: 8
+      max: 16
+      step: 2
+    notes: Grid size in y. Keep aligned with nx/nz for stable tiny-box sweeps.
+
+  - name: nz
+    type: int
+    default: 8
+    bounds:
+      min: 8
+      max: 16
+      step: 2
+    notes: Grid size in z. Upper bound chosen to keep total cells small.
+
+  - name: gamma
+    type: float
+    default: 1.66666667
+    bounds:
+      min: 1.05
+      max: 1.8
+    notes: Hydro adiabatic index; must remain > 1.0.
+
+  - name: Init_redshift
+    type: float
+    default: 0.0
+    bounds:
+      min: 0.0
+      max: 2.0
+    notes: Cosmology initialization redshift for short smoke exploration.
+
+  - name: H0
+    type: float
+    default: 67.66
+    bounds:
+      min: 60.0
+      max: 75.0
+    notes: Hubble parameter used by cosmology initialization.
+
+  - name: Omega_M
+    type: float
+    default: 0.3111
+    bounds:
+      min: 0.2
+      max: 0.4
+    notes: Matter density parameter; constrained with Omega_L and Omega_b.
+
+  - name: Omega_L
+    type: float
+    default: 0.6889
+    bounds:
+      min: 0.6
+      max: 0.8
+    notes: Dark-energy density parameter; constrained with Omega_M.
+
+global_safety:
+  no_recompile: true
+  runtime_goal: short_single_dump
+  fixed_params:
+    tout: 0.0
+    outstep: 0.0
+    init: Uniform
+    Omega_b: 0.0486
+    scale_outputs_file: tests/smoke_cosmo/scale_outputs.txt
+    n_proc_x: 1
+    n_proc_y: 1
+    n_proc_z: 1
+  constraints:
+    - name: max_total_cells
+      expr: "nx * ny * nz <= 4096"
+      reason: Prevent long runtimes and oversized smoke outputs.
+    - name: gamma_positive_constraint
+      expr: "gamma > 1.0"
+      reason: Required by runtime checks in initial condition setup.
+    - name: omega_sum_near_unity
+      expr: "0.95 <= (Omega_M + Omega_L) <= 1.05"
+      reason: Keep cosmology parameters physically consistent for smoke runs.
+    - name: positive_omega_b_less_than_matter
+      expr: "0.0 < Omega_b <= Omega_M"
+      reason: Preserve a physically plausible baryon fraction.
