@@ -13,6 +13,7 @@ import numpy as np
 
 
 SNAPSHOT_FILE_RE = re.compile(r".*\.(?:h5|hdf5)(?:\.\d+)?$", re.IGNORECASE)
+NON_HYDRO_SNAPSHOT_RE = re.compile(r".*_(?:gravity|particles)\.(?:h5|hdf5)(?:\.\d+)?$", re.IGNORECASE)
 DENSITY_EXACT_DATASETS = ("density", "rho")
 VELOCITY_COMPONENT_ALIASES = (
     ("vx", "vel_x"),
@@ -101,6 +102,9 @@ def _find_snapshot(run_dir: Path, manifest: dict[str, Any]) -> Path | None:
     if not candidates:
         return None
     ordered = sorted(candidates, key=lambda p: (p.name.lower(), str(p)))
+    preferred = [path for path in ordered if not NON_HYDRO_SNAPSHOT_RE.fullmatch(path.name)]
+    if preferred:
+        return preferred[-1]
     return ordered[-1]
 
 
