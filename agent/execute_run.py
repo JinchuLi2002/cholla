@@ -79,6 +79,78 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _run_iteration_validator(
+    repo_root: Path,
+    run_dir: str,
+    validation_dst: Path,
+    logs_dir: Path,
+) -> dict[str, Any]:
+    run_dir_raw = run_dir.strip()
+    if not run_dir_raw:
+        payload = {
+            "status": "fail",
+            "details": "missing backend_run_dir; validator not executed",
+            "run_dir": "",
+        }
+        _write_json(validation_dst, payload)
+        return payload
+
+    run_dir_path = Path(run_dir_raw)
+    if not run_dir_path.is_absolute():
+        run_dir_path = (repo_root / run_dir_path).resolve()
+
+    validator_script = repo_root / "scripts" / "validate_smoke.py"
+    stdout_log = logs_dir / "validator.stdout.log"
+    stderr_log = logs_dir / "validator.stderr.log"
+
+    if validator_script.exists():
+        cmd = [
+            "python3",
+            "scripts/validate_smoke.py",
+            "--run_dir",
+            str(run_dir_path),
+            "--out",
+            str(validation_dst),
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        stdout_log.write_text(proc.stdout, encoding="utf-8")
+        stderr_log.write_text(proc.stderr, encoding="utf-8")
+
+        payload = _load_json(validation_dst)
+        if not payload:
+            payload = {
+                "status": "pass" if proc.returncode == 0 else "fail",
+                "details": "validator returned without JSON payload",
+                "run_dir": str(run_dir_path),
+                "validator_cmd": " ".join(cmd),
+                "validator_exit_code": proc.returncode,
+            }
+            _write_json(validation_dst, payload)
+        return payload
+
+    payload = {
+        "status": "fail",
+        "details": "scripts/validate_smoke.py missing; validator not executed",
+        "run_dir": str(run_dir_path),
+        "validator_cmd": "",
+    }
+    _write_json(validation_dst, payload)
+    stdout_log.write_text("", encoding="utf-8")
+    stderr_log.write_text("scripts/validate_smoke.py missing\n", encoding="utf-8")
+    return payload
+
+
 def _derive_agent_run_id(seed: int) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"seed{seed}_{stamp}"
@@ -154,14 +226,12 @@ def execute_run(
     stderr_log.write_text(proc.stderr, encoding="utf-8")
 
     manifest_src = repo_root / "artifacts" / "run_manifest.json"
-    validation_src = repo_root / "artifacts" / "validation.json"
     last_run_dir_src = repo_root / "artifacts" / "last_run_dir.txt"
     manifest_dst = artifacts_dir / "run_manifest.json"
     validation_dst = artifacts_dir / "validation.json"
     last_run_dir_dst = artifacts_dir / "last_run_dir.txt"
 
     has_manifest = _copy_if_exists(manifest_src, manifest_dst)
-    has_validation = _copy_if_exists(validation_src, validation_dst)
     has_last_run = _copy_if_exists(last_run_dir_src, last_run_dir_dst)
 
     run_dir = ""
@@ -177,8 +247,14 @@ def execute_run(
             "Template mutation detected: tests/smoke_cosmo/params.txt changed during execute_run."
         )
 
+    validation_payload = _run_iteration_validator(
+        repo_root=repo_root,
+        run_dir=run_dir,
+        validation_dst=validation_dst,
+        logs_dir=logs_dir,
+    )
+    has_validation = validation_dst.exists()
     manifest_payload = _load_json(manifest_dst) if has_manifest else {}
-    validation_payload = _load_json(validation_dst) if has_validation else {}
 
     record: dict[str, Any] = {
         "agent_run_id": agent_run_id,
