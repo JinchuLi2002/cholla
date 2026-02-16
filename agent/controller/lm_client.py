@@ -10,7 +10,7 @@ from urllib import request as urllib_request
 
 from agent.controller.specs import SchemaValidationError, validate_json_schema
 
-OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 JSON_ONLY_INSTRUCTION = (
     "You must return exactly one JSON object and nothing else. "
     "Do not use markdown code fences. "
@@ -26,16 +26,54 @@ def _error_text(code: str, detail: str) -> str:
     return f"lm_client_error[{code}]: {detail}"
 
 
-def _require_api_key() -> str:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+def _normalize_base_url(raw_value: str) -> str:
+    normalized = raw_value.strip()
+    if not normalized:
+        return ""
+
+    if normalized.endswith("/chat/completions"):
+        normalized = normalized[: -len("/chat/completions")]
+    return normalized.rstrip("/")
+
+
+def _chat_completions_url(base_url: str) -> str:
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return f"{trimmed}/chat/completions"
+    return f"{trimmed}/v1/chat/completions"
+
+
+def _resolve_api_config(
+    *,
+    api_key_override: str | None,
+    base_url_override: str | None,
+) -> tuple[str, str]:
+    api_key = api_key_override.strip() if isinstance(api_key_override, str) else ""
+    if not api_key:
+        api_key = (
+            os.environ.get("ASTROMLAB_API_KEY", "").strip()
+            or os.environ.get("OPENAI_API_KEY", "").strip()
+        )
     if not api_key:
         raise LMClientError(
             _error_text(
                 "missing_api_key",
-                "OPENAI_API_KEY is required for call_openai_json",
+                "ASTROMLAB_API_KEY or OPENAI_API_KEY is required for call_openai_json",
             )
         )
-    return api_key
+
+    base_url = base_url_override.strip() if isinstance(base_url_override, str) else ""
+    if not base_url:
+        base_url = (
+            os.environ.get("ASTROMLAB_ENDPOINT", "").strip()
+            or os.environ.get("OPENAI_BASE_URL", "").strip()
+            or DEFAULT_OPENAI_BASE_URL
+        )
+    normalized_base_url = _normalize_base_url(base_url)
+    if not normalized_base_url:
+        normalized_base_url = DEFAULT_OPENAI_BASE_URL
+
+    return api_key, normalized_base_url
 
 
 def _strict_json_object(text: str) -> dict[str, Any]:
@@ -121,6 +159,7 @@ def _validate_output_schema(payload: Mapping[str, Any], output_schema: Mapping[s
 def _sdk_call(
     *,
     api_key: str,
+    base_url: str,
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
@@ -130,7 +169,7 @@ def _sdk_call(
     except Exception as exc:  # noqa: BLE001
         raise LMClientError(_error_text("sdk_unavailable", str(exc))) from exc
 
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(base_url=base_url, api_key=api_key)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -157,6 +196,7 @@ def _sdk_call(
 def _http_call(
     *,
     api_key: str,
+    chat_completions_url: str,
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
@@ -170,7 +210,7 @@ def _http_call(
     data = json.dumps(body).encode("utf-8")
 
     req = urllib_request.Request(
-        OPENAI_CHAT_COMPLETIONS_URL,
+        chat_completions_url,
         data=data,
         method="POST",
         headers={
@@ -225,6 +265,8 @@ def call_openai_json(
     temperature: float = 0.0,
     *,
     output_schema: Mapping[str, Any] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """Call OpenAI and return a strictly parsed JSON object.
 
@@ -245,7 +287,11 @@ def call_openai_json(
     except (TypeError, ValueError) as exc:
         raise LMClientError(_error_text("invalid_temperature", str(exc))) from exc
 
-    api_key = _require_api_key()
+    resolved_api_key, resolved_base_url = _resolve_api_config(
+        api_key_override=api_key,
+        base_url_override=base_url,
+    )
+    chat_completions_url = _chat_completions_url(resolved_base_url)
     messages = _messages(
         system_prompt=system_prompt,
         user_payload=user_payload,
@@ -254,7 +300,8 @@ def call_openai_json(
 
     try:
         response_text = _sdk_call(
-            api_key=api_key,
+            api_key=resolved_api_key,
+            base_url=resolved_base_url,
             model=model.strip(),
             temperature=temp,
             messages=messages,
@@ -264,7 +311,8 @@ def call_openai_json(
         if "sdk_unavailable" not in str(sdk_exc):
             raise
         response_text = _http_call(
-            api_key=api_key,
+            api_key=resolved_api_key,
+            chat_completions_url=chat_completions_url,
             model=model.strip(),
             temperature=temp,
             messages=messages,
