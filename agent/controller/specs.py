@@ -54,6 +54,44 @@ PLAN_SPEC_V0_SCHEMA: dict[str, Any] = {
 }
 
 
+SUMMARIZER_INPUT_V0_SCHEMA: dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "summarizer_input_v0",
+    "type": "object",
+    "properties": {
+        "iteration": {"type": "integer", "minimum": 0},
+        "state": {"type": "object", "additionalProperties": True},
+        "budgets": {"type": "object", "additionalProperties": True},
+        "param_space": {"type": "object", "additionalProperties": True},
+        "history_path": {"type": "string", "minLength": 1},
+        "history_records": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["iteration", "state", "budgets", "param_space"],
+    "additionalProperties": False,
+}
+
+
+PLANNER_INPUT_V0_SCHEMA: dict[str, Any] = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "planner_input_v0",
+    "type": "object",
+    "properties": {
+        "iteration": {"type": "integer", "minimum": 0},
+        "state": {"type": "object", "additionalProperties": True},
+        "budgets": {"type": "object", "additionalProperties": True},
+        "summary": SUMMARY_SPEC_V0_SCHEMA,
+        "param_space": {"type": "object", "additionalProperties": True},
+        "history_path": {"type": "string", "minLength": 1},
+    },
+    "required": ["iteration", "state", "budgets", "summary", "param_space", "history_path"],
+    "additionalProperties": False,
+}
+
+
+SUMMARIZER_OUTPUT_V0_SCHEMA: dict[str, Any] = SUMMARY_SPEC_V0_SCHEMA
+PLANNER_OUTPUT_V0_SCHEMA: dict[str, Any] = PLAN_SPEC_V0_SCHEMA
+
+
 class SchemaValidationError(ValueError):
     """Raised when a payload fails schema validation."""
 
@@ -167,6 +205,29 @@ def validate_summary_spec(payload: Mapping[str, Any]) -> SummarySpecV0:
     return summary
 
 
+def validate_summarizer_input(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize summarizer input payload."""
+
+    if not isinstance(payload, Mapping):
+        raise SchemaValidationError("SummarizerInputV0 payload must be an object")
+
+    payload_dict = dict(payload)
+    validate_json_schema(payload_dict, SUMMARIZER_INPUT_V0_SCHEMA, schema_name="SummarizerInputV0")
+    ensure_json_serializable(payload_dict, label="SummarizerInputV0 payload")
+    return payload_dict
+
+
+def validate_summarizer_output(payload: Mapping[str, Any]) -> SummarySpecV0:
+    """Validate and normalize summarizer output payload."""
+
+    if not isinstance(payload, Mapping):
+        raise SchemaValidationError("SummarizerOutputV0 payload must be an object")
+
+    payload_dict = dict(payload)
+    validate_json_schema(payload_dict, SUMMARIZER_OUTPUT_V0_SCHEMA, schema_name="SummarizerOutputV0")
+    return validate_summary_spec(payload_dict)
+
+
 def validate_plan_spec(payload: Mapping[str, Any]) -> PlanSpecV0:
     """Validate and normalize a PlanSpec v0 payload."""
 
@@ -198,6 +259,29 @@ def validate_plan_spec(payload: Mapping[str, Any]) -> PlanSpecV0:
     )
     ensure_json_serializable(plan.to_dict(), label="PlanSpecV0 normalized payload")
     return plan
+
+
+def validate_planner_input(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and normalize planner input payload."""
+
+    if not isinstance(payload, Mapping):
+        raise SchemaValidationError("PlannerInputV0 payload must be an object")
+
+    payload_dict = dict(payload)
+    validate_json_schema(payload_dict, PLANNER_INPUT_V0_SCHEMA, schema_name="PlannerInputV0")
+    ensure_json_serializable(payload_dict, label="PlannerInputV0 payload")
+    return payload_dict
+
+
+def validate_planner_output(payload: Mapping[str, Any]) -> PlanSpecV0:
+    """Validate and normalize planner output payload."""
+
+    if not isinstance(payload, Mapping):
+        raise SchemaValidationError("PlannerOutputV0 payload must be an object")
+
+    payload_dict = dict(payload)
+    validate_json_schema(payload_dict, PLANNER_OUTPUT_V0_SCHEMA, schema_name="PlannerOutputV0")
+    return validate_plan_spec(payload_dict)
 
 
 def _iter_schema_errors(*, payload: Any, schema: Mapping[str, Any], path: str) -> list[str]:
@@ -331,14 +415,22 @@ def _is_number(value: Any) -> bool:
 
 
 __all__ = [
+    "PLANNER_INPUT_V0_SCHEMA",
+    "PLANNER_OUTPUT_V0_SCHEMA",
     "PLAN_SPEC_V0_SCHEMA",
+    "SUMMARIZER_INPUT_V0_SCHEMA",
+    "SUMMARIZER_OUTPUT_V0_SCHEMA",
     "SUMMARY_SPEC_V0_SCHEMA",
     "PlanSpecV0",
     "PlanToolCallV0",
     "SchemaValidationError",
     "SummarySpecV0",
     "ensure_json_serializable",
+    "validate_planner_input",
+    "validate_planner_output",
     "validate_json_schema",
     "validate_plan_spec",
+    "validate_summarizer_input",
+    "validate_summarizer_output",
     "validate_summary_spec",
 ]

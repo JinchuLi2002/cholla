@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,15 @@ from typing import Any, Mapping
 import yaml
 
 from agent.controller.history import HistoryRecordV0, HistoryWriter, utc_now
-from agent.controller.specs import PlanSpecV0, SummarySpecV0, validate_plan_spec, validate_summary_spec
+from agent.controller.specs import (
+    PlanSpecV0,
+    SummarySpecV0,
+    validate_plan_spec,
+    validate_planner_input,
+    validate_planner_output,
+    validate_summarizer_input,
+    validate_summarizer_output,
+)
 from agent.tools.registry import TOOLS as DEFAULT_TOOLS
 
 
@@ -199,6 +208,8 @@ class HybridController:
 
         run_dir = self.run_root / self.controller_run_id
         run_dir.mkdir(parents=True, exist_ok=True)
+        tasks_dir = self._controller_tasks_dir(self.experiment_id)
+        tasks_dir.mkdir(parents=True, exist_ok=True)
 
         state: dict[str, Any] = dict(initial_state or {})
         state.setdefault("param_space", param_space)
@@ -244,46 +255,108 @@ class HybridController:
                 start_time=start_time,
             )
 
+            summary_input_payload = {
+                "iteration": iteration,
+                "state": state,
+                "budgets": budgets,
+                "param_space": param_space,
+            }
+            summary_input_path = artifacts_dir / "summary_input.json"
+            summary_task_status = "success"
+            summary_task_error: str | None = None
+            summary_task_outputs: list[Path] = []
+            summary_task_inputs: list[Path] = []
+
             try:
-                summary_input = {
-                    "iteration": iteration,
-                    "state": state,
-                    "budgets": budgets,
-                    "param_space": param_space,
-                }
-                summary_spec = validate_summary_spec(self._invoke_summarizer(summary_input))
+                summary_input = validate_summarizer_input(summary_input_payload)
+                _write_json(summary_input_path, summary_input)
+                artifact_paths["summary_input_path"] = str(summary_input_path)
+                summary_task_inputs.append(summary_input_path)
+                summary_spec = validate_summarizer_output(self._invoke_summarizer(summary_input))
                 summary_path = artifacts_dir / "summary_spec.json"
                 _write_json(summary_path, summary_spec.to_dict())
                 artifact_paths["summary_spec_path"] = str(summary_path)
+                summary_task_outputs.append(summary_path)
                 if summary_spec.state_patch:
                     state.update(summary_spec.state_patch)
             except Exception as exc:  # noqa: BLE001
+                summary_task_status = "failed"
+                summary_task_error = str(exc)
                 iteration_status = "failed"
                 iteration_error = f"summarizer_error: {exc}"
                 iteration_termination = "summarizer_error"
+            finally:
+                try:
+                    summarizer_task_path = self._write_agent_task_envelope(
+                        tasks_dir=tasks_dir,
+                        iteration=iteration,
+                        agent_kind="summarizer",
+                        input_payload=summary_input_payload,
+                        input_artifacts=summary_task_inputs,
+                        output_artifacts=summary_task_outputs,
+                        status=summary_task_status,
+                        error=summary_task_error,
+                    )
+                    artifact_paths["summarizer_task_path"] = str(summarizer_task_path)
+                except Exception as task_exc:  # noqa: BLE001
+                    task_error = f"summarizer_task_error: {task_exc}"
+                    iteration_status = "failed"
+                    iteration_error = f"{iteration_error}; {task_error}" if iteration_error else task_error
+                    iteration_termination = "summarizer_task_error"
 
             if iteration_status == "success" and summary_spec is not None and summary_spec.should_stop:
                 iteration_status = "terminated"
                 iteration_termination = summary_spec.termination_reason_hint or "summarizer_requested_stop"
 
             if iteration_status == "success":
+                planner_input_payload = {
+                    "iteration": iteration,
+                    "state": state,
+                    "budgets": budgets,
+                    "summary": summary_spec.to_dict() if summary_spec is not None else {},
+                    "param_space": param_space,
+                    "history_path": str(self.history_writer.path),
+                }
+                planner_input_path = artifacts_dir / "planner_input.json"
+                planner_task_status = "success"
+                planner_task_error: str | None = None
+                planner_task_outputs: list[Path] = []
+                planner_task_inputs: list[Path] = []
+
                 try:
-                    planner_input = {
-                        "iteration": iteration,
-                        "state": state,
-                        "budgets": budgets,
-                        "summary": summary_spec.to_dict() if summary_spec is not None else {},
-                        "param_space": param_space,
-                        "history_path": str(self.history_writer.path),
-                    }
-                    plan_spec = validate_plan_spec(self._invoke_planner(planner_input))
+                    planner_input = validate_planner_input(planner_input_payload)
+                    _write_json(planner_input_path, planner_input)
+                    artifact_paths["planner_input_path"] = str(planner_input_path)
+                    planner_task_inputs.append(planner_input_path)
+                    plan_spec = validate_planner_output(self._invoke_planner(planner_input))
                     plan_path = artifacts_dir / "plan_spec.json"
                     _write_json(plan_path, plan_spec.to_dict())
                     artifact_paths["plan_spec_path"] = str(plan_path)
+                    planner_task_outputs.append(plan_path)
                 except Exception as exc:  # noqa: BLE001
+                    planner_task_status = "failed"
+                    planner_task_error = str(exc)
                     iteration_status = "failed"
                     iteration_error = f"planner_error: {exc}"
                     iteration_termination = "planner_error"
+                finally:
+                    try:
+                        planner_task_path = self._write_agent_task_envelope(
+                            tasks_dir=tasks_dir,
+                            iteration=iteration,
+                            agent_kind="planner",
+                            input_payload=planner_input_payload,
+                            input_artifacts=planner_task_inputs,
+                            output_artifacts=planner_task_outputs,
+                            status=planner_task_status,
+                            error=planner_task_error,
+                        )
+                        artifact_paths["planner_task_path"] = str(planner_task_path)
+                    except Exception as task_exc:  # noqa: BLE001
+                        task_error = f"planner_task_error: {task_exc}"
+                        iteration_status = "failed"
+                        iteration_error = f"{iteration_error}; {task_error}" if iteration_error else task_error
+                        iteration_termination = "planner_task_error"
 
             if iteration_status == "success" and plan_spec is not None and plan_spec.should_stop:
                 iteration_status = "terminated"
@@ -714,8 +787,249 @@ class HybridController:
                 return run_id
         return None
 
+    def _tool_call_by_name(self, tool_results: list[dict[str, Any]], tool_name: str) -> dict[str, Any] | None:
+        for call in tool_results:
+            if call.get("tool") == tool_name:
+                return dict(call)
+        return None
+
+    def _metric_scalar_from_tool_results(self, tool_results: list[dict[str, Any]]) -> float | None:
+        for call in tool_results:
+            if call.get("tool") != "compute_metric":
+                continue
+            result = call.get("result")
+            result_map = dict(result) if isinstance(result, Mapping) else {}
+            scalar = result_map.get("scalar")
+            if isinstance(scalar, (int, float)) and not isinstance(scalar, bool):
+                return float(scalar)
+            metric_value = result_map.get("metric_value")
+            if isinstance(metric_value, (int, float)) and not isinstance(metric_value, bool):
+                return float(metric_value)
+        return None
+
+    def _replay_invoke_tool_call(
+        self,
+        *,
+        call_index: int,
+        tool_name: str,
+        payload: dict[str, Any],
+        artifacts_dir: Path,
+    ) -> dict[str, Any]:
+        try:
+            result = self._invoke_tool(tool_name=tool_name, payload=payload)
+        except Exception as exc:  # noqa: BLE001
+            result = {"status": "error", "error": str(exc)}
+
+        status = self._tool_call_status(tool_name=tool_name, result=result)
+        call_record = {
+            "index": call_index,
+            "timestamp_utc": utc_now(),
+            "tool": tool_name,
+            "status": status,
+            "payload": dict(payload),
+            "result": dict(result),
+        }
+        _write_json(artifacts_dir / f"replay_tool_{call_index:02d}_{tool_name}.json", call_record)
+        return call_record
+
+    def _replay_execute_iteration_tool_chain(
+        self,
+        *,
+        iteration: int,
+        controller_run_id: str,
+        proposed_params: dict[str, Any],
+        template_params_text: str,
+        schedule_text: str,
+        replay_iter_dir: Path,
+        artifacts_dir: Path,
+    ) -> list[dict[str, Any]]:
+        replay_iter_dir.mkdir(parents=True, exist_ok=True)
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        tool_results: list[dict[str, Any]] = []
+
+        validate_payload = {"params": dict(proposed_params)}
+        validate_call = self._replay_invoke_tool_call(
+            call_index=0,
+            tool_name="validate_params",
+            payload=validate_payload,
+            artifacts_dir=artifacts_dir,
+        )
+        tool_results.append(validate_call)
+        validate_result = validate_call.get("result")
+        validate_result_map = dict(validate_result) if isinstance(validate_result, Mapping) else {}
+        if validate_call.get("status") != "success" or validate_result_map.get("valid") is not True:
+            errors = validate_result_map.get("errors")
+            raise ValueError(
+                f"replay mismatch iteration {iteration}: validate_params replay failed with errors={errors!r}"
+            )
+
+        params_text = _render_params_text(template_params_text, proposed_params)
+        rendered_params_path = artifacts_dir / "replay_rendered_params.txt"
+        rendered_schedule_path = artifacts_dir / "replay_rendered_schedule.txt"
+        rendered_params_path.write_text(params_text, encoding="utf-8")
+        rendered_schedule_path.write_text(schedule_text, encoding="utf-8")
+
+        expected_run_id = f"{controller_run_id}_iter_{iteration:04d}"
+        run_payload = {
+            "params_text": params_text,
+            "schedule_text": schedule_text,
+            "out_root": str((replay_iter_dir / "backend_runs").resolve()),
+            "run_id": expected_run_id,
+        }
+        run_call = self._replay_invoke_tool_call(
+            call_index=1,
+            tool_name="run_cholla",
+            payload=run_payload,
+            artifacts_dir=artifacts_dir,
+        )
+        tool_results.append(run_call)
+        run_result = run_call.get("result")
+        run_result_map = dict(run_result) if isinstance(run_result, Mapping) else {}
+        if run_call.get("status") != "success":
+            raise ValueError(
+                "replay mismatch iteration "
+                f"{iteration}: run_cholla replay failed with error={run_result_map.get('error')!r}"
+            )
+        run_manifest_path = run_result_map.get("run_manifest_path")
+        if not isinstance(run_manifest_path, str) or not run_manifest_path.strip():
+            raise ValueError(f"replay mismatch iteration {iteration}: missing run_manifest_path from run_cholla")
+
+        metric_call = self._replay_invoke_tool_call(
+            call_index=2,
+            tool_name="compute_metric",
+            payload={"run_manifest_path": run_manifest_path},
+            artifacts_dir=artifacts_dir,
+        )
+        tool_results.append(metric_call)
+        metric_result = metric_call.get("result")
+        metric_result_map = dict(metric_result) if isinstance(metric_result, Mapping) else {}
+        metric_details = metric_result_map.get("details")
+        metric_details_map = dict(metric_details) if isinstance(metric_details, Mapping) else {}
+        if metric_call.get("status") != "success" or metric_details_map.get("status") != "success":
+            raise ValueError(
+                "replay mismatch iteration "
+                f"{iteration}: compute_metric replay failed with error={metric_details_map.get('error')!r}"
+            )
+
+        return tool_results
+
+    def _experiment_bundle_dir(self, experiment_id: str) -> Path:
+        return self.repo_root / "agent" / "experiments" / experiment_id
+
     def _controller_bundle_dir(self, experiment_id: str) -> Path:
-        return self.repo_root / "agent" / "experiments" / experiment_id / "controller"
+        return self._experiment_bundle_dir(experiment_id) / "controller"
+
+    def _controller_tasks_dir(self, experiment_id: str) -> Path:
+        return self._experiment_bundle_dir(experiment_id) / "tasks"
+
+    def _agent_card(self, agent_kind: str) -> dict[str, Any]:
+        if not hasattr(self, "_agent_cards_cache"):
+            self._agent_cards_cache: dict[str, dict[str, Any]] = {}
+
+        cached = self._agent_cards_cache.get(agent_kind)
+        if cached is not None:
+            return dict(cached)
+
+        card_path = self.repo_root / "agent" / "agents" / "cards" / f"{agent_kind}.agent.json"
+        if not card_path.exists() or not card_path.is_file():
+            raise FileNotFoundError(f"missing agent card for {agent_kind!r}: {card_path}")
+
+        card_payload = _load_json(card_path)
+        required_fields = ("name", "version", "capabilities", "input_schema", "output_schema")
+        missing_fields = [field for field in required_fields if field not in card_payload]
+        if missing_fields:
+            raise ValueError(f"agent card {card_path} missing required fields: {missing_fields}")
+
+        self._agent_cards_cache[agent_kind] = dict(card_payload)
+        return dict(card_payload)
+
+    def _agent_runtime_audit(
+        self,
+        *,
+        agent_kind: str,
+        input_payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if agent_kind == "planner":
+            agent_obj = self.planner
+        elif agent_kind == "summarizer":
+            agent_obj = self.summarizer
+        else:
+            raise ValueError(f"unknown agent_kind: {agent_kind!r}")
+
+        model_raw = getattr(agent_obj, "model", None)
+        model = model_raw.strip() if isinstance(model_raw, str) and model_raw.strip() else None
+
+        temp_raw = getattr(agent_obj, "temperature", None)
+        if isinstance(temp_raw, (int, float)) and not isinstance(temp_raw, bool):
+            temperature: float | None = float(temp_raw)
+        elif model is not None:
+            temperature = 0.0
+        else:
+            temperature = None
+
+        prompt_raw = getattr(agent_obj, "system_prompt", "")
+        system_prompt = prompt_raw if isinstance(prompt_raw, str) else str(prompt_raw)
+        hash_payload = {
+            "system_prompt": system_prompt,
+            "input": dict(input_payload),
+        }
+        prompt_input_hash = hashlib.sha256(
+            json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+
+        return {
+            "model": model,
+            "temperature": temperature,
+            "prompt_input_hash": prompt_input_hash,
+        }
+
+    def _write_agent_task_envelope(
+        self,
+        *,
+        tasks_dir: Path,
+        iteration: int,
+        agent_kind: str,
+        input_payload: Mapping[str, Any],
+        input_artifacts: list[Path],
+        output_artifacts: list[Path],
+        status: str,
+        error: str | None,
+    ) -> Path:
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+
+        input_paths: list[str] = []
+        for path in input_artifacts:
+            if path.exists():
+                input_paths.append(str(path))
+
+        output_paths: list[str] = []
+        for path in output_artifacts:
+            if path.exists():
+                output_paths.append(str(path))
+
+        card = self._agent_card(agent_kind)
+        audit = self._agent_runtime_audit(agent_kind=agent_kind, input_payload=input_payload)
+        task_name = f"task_{iteration}_{agent_kind}"
+        envelope = {
+            "task_id": f"{self.experiment_id}:{self.controller_run_id}:{task_name}",
+            "experiment_id": self.experiment_id,
+            "controller_run_id": self.controller_run_id,
+            "iteration": iteration,
+            "agent_kind": agent_kind,
+            "timestamp_utc": utc_now(),
+            "status": status,
+            "error": error,
+            "agent_card": card,
+            "input_artifacts": input_paths,
+            "output_artifacts": output_paths,
+            "model": audit["model"],
+            "temperature": audit["temperature"],
+            "prompt_input_hash": audit["prompt_input_hash"],
+        }
+        task_path = tasks_dir / f"{task_name}.json"
+        _write_json(task_path, envelope)
+        return task_path
 
     def _write_controller_bundle(
         self,
@@ -797,12 +1111,20 @@ class HybridController:
         _write_json(bundle_dir / "summary.json", summary_payload)
         return bundle_dir
 
-    def replay(self, experiment_id: str) -> dict[str, Any]:
-        """Replay controller advisory outputs and verify stored integrity."""
+    def replay(self, experiment_id: str, replay_mode: str = "strict") -> dict[str, Any]:
+        """Replay controller records in strict or live mode.
+
+        strict: reuse stored SummarySpec/PlanSpec and re-run tools; enforce params, RUN_ID, and metric scalar.
+        live: strict checks plus fresh LM calls with non-fatal diffs against stored SummarySpec/PlanSpec.
+        """
 
         if not isinstance(experiment_id, str) or not experiment_id.strip():
             raise ValueError("experiment_id must be a non-empty string")
         experiment_id = experiment_id.strip()
+
+        replay_mode_norm = replay_mode.strip().lower() if isinstance(replay_mode, str) else ""
+        if replay_mode_norm not in {"strict", "live"}:
+            raise ValueError(f"replay_mode must be one of ['strict', 'live'], got {replay_mode!r}")
 
         bundle_dir = self._controller_bundle_dir(experiment_id)
         config_path = bundle_dir / "config.json"
@@ -825,6 +1147,10 @@ class HybridController:
         if not isinstance(param_space_payload, dict):
             raise ValueError(f"invalid param_space payload in {param_space_path}")
 
+        template_params_path, template_schedule_path = self._resolve_template_paths(param_space_payload)
+        template_params_text = template_params_path.read_text(encoding="utf-8")
+        schedule_text = template_schedule_path.read_text(encoding="utf-8")
+
         all_records = _load_jsonl(history_path)
         iteration_records = [
             record
@@ -838,77 +1164,177 @@ class HybridController:
             "history_path": str(history_path),
             "history_records": [],
         }
+        replay_artifacts_root = bundle_dir / "replay" / replay_mode_norm
+        replay_artifacts_root.mkdir(parents=True, exist_ok=True)
 
         params_checked = 0
         run_ids_checked = 0
+        metrics_checked = 0
+        live_diffs: list[dict[str, Any]] = []
+
         for record in iteration_records:
             iteration = int(record["iteration"])
             budgets = record.get("budgets")
             budgets_map = dict(budgets) if isinstance(budgets, Mapping) else {}
 
-            summary_input = {
-                "iteration": iteration,
-                "state": replay_state,
-                "budgets": budgets_map,
-                "param_space": param_space_payload,
-            }
-            expected_summary = validate_summary_spec(self._invoke_summarizer(summary_input)).to_dict()
-            observed_summary = record.get("summary")
-            if not isinstance(observed_summary, Mapping):
+            observed_summary_raw = record.get("summary")
+            if not isinstance(observed_summary_raw, Mapping):
                 raise ValueError(f"replay mismatch iteration {iteration}: missing stored summary")
-            summary_diff = _first_diff(expected_summary, dict(observed_summary), path="summary")
-            if summary_diff:
-                raise ValueError(f"replay mismatch iteration {iteration}: {summary_diff}")
+            observed_summary = validate_summarizer_output(dict(observed_summary_raw)).to_dict()
 
-            state_patch = expected_summary.get("state_patch")
+            observed_plan_raw = record.get("plan")
+            if not isinstance(observed_plan_raw, Mapping):
+                raise ValueError(f"replay mismatch iteration {iteration}: missing stored plan")
+            observed_plan = validate_planner_output(dict(observed_plan_raw)).to_dict()
+            observed_plan_spec = validate_plan_spec(observed_plan)
+
+            if replay_mode_norm == "live":
+                try:
+                    live_summary_input = validate_summarizer_input(
+                        {
+                            "iteration": iteration,
+                            "state": replay_state,
+                            "budgets": budgets_map,
+                            "param_space": param_space_payload,
+                        }
+                    )
+                    live_summary = validate_summarizer_output(self._invoke_summarizer(live_summary_input)).to_dict()
+                    summary_diff = _first_diff(live_summary, observed_summary, path="summary")
+                    if summary_diff:
+                        live_diffs.append(
+                            {
+                                "iteration": iteration,
+                                "artifact": "summary",
+                                "diff": summary_diff,
+                            }
+                        )
+
+                    live_planner_input = validate_planner_input(
+                        {
+                            "iteration": iteration,
+                            "state": replay_state,
+                            "budgets": budgets_map,
+                            "summary": live_summary,
+                            "param_space": param_space_payload,
+                            "history_path": str(history_path),
+                        }
+                    )
+                    live_plan = validate_planner_output(self._invoke_planner(live_planner_input)).to_dict()
+                    plan_diff = _first_diff(live_plan, observed_plan, path="plan")
+                    if plan_diff:
+                        live_diffs.append(
+                            {
+                                "iteration": iteration,
+                                "artifact": "plan",
+                                "diff": plan_diff,
+                            }
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    live_diffs.append(
+                        {
+                            "iteration": iteration,
+                            "artifact": "live_requery",
+                            "diff": f"live_requery_error: {exc}",
+                        }
+                    )
+
+            state_patch = observed_summary.get("state_patch")
             if isinstance(state_patch, Mapping):
                 replay_state.update(dict(state_patch))
 
-            planner_input = {
-                "iteration": iteration,
-                "state": replay_state,
-                "budgets": budgets_map,
-                "summary": expected_summary,
-                "param_space": param_space_payload,
-                "history_path": str(history_path),
-            }
-            expected_plan = validate_plan_spec(self._invoke_planner(planner_input)).to_dict()
-            observed_plan = record.get("plan")
-            if not isinstance(observed_plan, Mapping):
-                raise ValueError(f"replay mismatch iteration {iteration}: missing stored plan")
-            plan_diff = _first_diff(expected_plan, dict(observed_plan), path="plan")
-            if plan_diff:
-                raise ValueError(f"replay mismatch iteration {iteration}: {plan_diff}")
-
-            expected_params = self._extract_proposed_params(validate_plan_spec(expected_plan))
-            observed_params = self._extract_proposed_params(validate_plan_spec(dict(observed_plan)))
-            params_diff = _first_diff(expected_params, observed_params, path="proposed_params")
-            if params_diff:
-                raise ValueError(f"replay mismatch iteration {iteration}: {params_diff}")
-            params_checked += 1
-
-            expected_run_id = f"{controller_run_id}_iter_{iteration:04d}"
-            history_run_id = record.get("RUN_ID")
-            if history_run_id != expected_run_id:
-                raise ValueError(
-                    "replay mismatch iteration "
-                    f"{iteration}: RUN_ID history mismatch expected {expected_run_id!r}, got {history_run_id!r}"
-                )
-
             tool_results_raw = record.get("tool_results")
-            tool_results = tool_results_raw if isinstance(tool_results_raw, list) else []
-            tool_run_id = self._run_id_from_tool_results([dict(item) for item in tool_results if isinstance(item, Mapping)])
-            if tool_run_id != history_run_id:
-                raise ValueError(
-                    "replay mismatch iteration "
-                    f"{iteration}: RUN_ID tool mismatch history={history_run_id!r} tool={tool_run_id!r}"
+            observed_tool_results = [dict(item) for item in tool_results_raw if isinstance(item, Mapping)] if isinstance(
+                tool_results_raw, list
+            ) else []
+
+            if not observed_plan_spec.should_stop:
+                expected_params = self._extract_proposed_params(observed_plan_spec)
+                stored_validate_call = self._tool_call_by_name(observed_tool_results, "validate_params")
+                stored_run_call = self._tool_call_by_name(observed_tool_results, "run_cholla")
+                stored_metric_call = self._tool_call_by_name(observed_tool_results, "compute_metric")
+                should_replay_tools = (
+                    stored_validate_call is not None
+                    and stored_run_call is not None
+                    and stored_metric_call is not None
+                    and stored_run_call.get("status") == "success"
+                    and stored_metric_call.get("status") == "success"
                 )
-            run_ids_checked += 1
+                if stored_validate_call is not None:
+                    stored_validate_payload = (
+                        dict(stored_validate_call.get("payload"))
+                        if isinstance(stored_validate_call.get("payload"), Mapping)
+                        else {}
+                    )
+                    stored_params_raw = stored_validate_payload.get("params")
+                    stored_params = dict(stored_params_raw) if isinstance(stored_params_raw, Mapping) else {}
+                    stored_params_diff = _first_diff(expected_params, stored_params, path="stored.params")
+                    if stored_params_diff:
+                        raise ValueError(f"replay mismatch iteration {iteration}: {stored_params_diff}")
+                params_checked += 1
+
+                if should_replay_tools:
+                    replay_iter_dir = replay_artifacts_root / f"iter_{iteration}"
+                    replay_tool_results = self._replay_execute_iteration_tool_chain(
+                        iteration=iteration,
+                        controller_run_id=controller_run_id,
+                        proposed_params=expected_params,
+                        template_params_text=template_params_text,
+                        schedule_text=schedule_text,
+                        replay_iter_dir=replay_iter_dir,
+                        artifacts_dir=replay_iter_dir / "artifacts",
+                    )
+
+                    replay_validate_call = self._tool_call_by_name(replay_tool_results, "validate_params")
+                    replay_validate_payload = (
+                        dict(replay_validate_call.get("payload"))
+                        if isinstance(replay_validate_call, Mapping) and isinstance(replay_validate_call.get("payload"), Mapping)
+                        else {}
+                    )
+                    replay_params_raw = replay_validate_payload.get("params")
+                    replay_params = dict(replay_params_raw) if isinstance(replay_params_raw, Mapping) else {}
+                    replay_params_diff = _first_diff(expected_params, replay_params, path="replay.params")
+                    if replay_params_diff:
+                        raise ValueError(f"replay mismatch iteration {iteration}: {replay_params_diff}")
+
+                    expected_run_id = f"{controller_run_id}_iter_{iteration:04d}"
+                    history_run_id = record.get("RUN_ID")
+                    if history_run_id != expected_run_id:
+                        raise ValueError(
+                            "replay mismatch iteration "
+                            f"{iteration}: RUN_ID history mismatch expected {expected_run_id!r}, got {history_run_id!r}"
+                        )
+
+                    replay_run_id = self._run_id_from_tool_results(replay_tool_results)
+                    if replay_run_id != history_run_id:
+                        raise ValueError(
+                            "replay mismatch iteration "
+                            f"{iteration}: RUN_ID replay mismatch history={history_run_id!r} replay={replay_run_id!r}"
+                        )
+
+                    stored_tool_run_id = self._run_id_from_tool_results(observed_tool_results)
+                    if stored_tool_run_id != history_run_id:
+                        raise ValueError(
+                            "replay mismatch iteration "
+                            f"{iteration}: RUN_ID stored tool mismatch history={history_run_id!r} tool={stored_tool_run_id!r}"
+                        )
+                    run_ids_checked += 1
+
+                    observed_metric_scalar = self._metric_scalar_from_tool_results(observed_tool_results)
+                    replay_metric_scalar = self._metric_scalar_from_tool_results(replay_tool_results)
+                    metric_diff = _first_diff(observed_metric_scalar, replay_metric_scalar, path="metric.scalar")
+                    if metric_diff:
+                        raise ValueError(f"replay mismatch iteration {iteration}: {metric_diff}")
+                    metrics_checked += 1
+
+                    replay_state["last_tool_results"] = replay_tool_results
+                else:
+                    replay_state["last_tool_results"] = observed_tool_results
+            else:
+                replay_state["last_tool_results"] = observed_tool_results
 
             replay_state["last_iteration"] = iteration
-            replay_state["last_summary"] = expected_summary
-            replay_state["last_plan"] = expected_plan
-            replay_state["last_tool_results"] = tool_results
+            replay_state["last_summary"] = observed_summary
+            replay_state["last_plan"] = observed_plan
             history_records_state = replay_state.get("history_records")
             if isinstance(history_records_state, list):
                 history_records_state.append(record)
@@ -929,14 +1355,20 @@ class HybridController:
                         f"{linked_experiment_id!r}: {replay_error}"
                     )
 
-        return {
+        result: dict[str, Any] = {
             "status": "ok",
             "experiment_id": experiment_id,
+            "replay_mode": replay_mode_norm,
             "iterations_checked": len(iteration_records),
             "params_checked": params_checked,
             "run_ids_checked": run_ids_checked,
+            "metrics_checked": metrics_checked,
+            "error": None,
             "replay_check": replay_check_result,
         }
+        if replay_mode_norm == "live":
+            result["live_diffs"] = live_diffs
+        return result
 
     def _budget_termination(self, *, tool_calls_used: int, start_time: float) -> str:
         if tool_calls_used >= self.max_tool_calls:

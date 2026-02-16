@@ -1,0 +1,11 @@
+{
+  "name": "tier4.phase3c.summarizer",
+  "version": "0.1.0",
+  "capabilities": [
+    "summarize.history",
+    "trend.detect",
+    "stop_hint"
+  ],
+  "input_schema": "agent.controller.specs:SUMMARIZER_INPUT_V0_SCHEMA",
+  "output_schema": "agent.controller.specs:SUMMARIZER_OUTPUT_V0_SCHEMA"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "tier4.phase3c.planner",
+  "version": "0.1.0",
+  "capabilities": [
+    "plan.next_params",
+    "plan.stop_decision",
+    "tool_call_advisory"
+  ],
+  "input_schema": "agent.controller.specs:PLANNER_INPUT_V0_SCHEMA",
+  "output_schema": "agent.controller.specs:PLANNER_OUTPUT_V0_SCHEMA"
+}
