@@ -1,4 +1,4 @@
-"""Minimal OpenAI JSON client for planner/summarizer advisory calls."""
+"""Minimal OpenAI/Azure OpenAI JSON client for planner/summarizer advisory calls."""
 
 from __future__ import annotations
 
@@ -6,11 +6,15 @@ import json
 import os
 from typing import Any, Mapping
 from urllib import error as urllib_error
+from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 from agent.controller.specs import SchemaValidationError, validate_json_schema
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+PROVIDER_OPENAI = "openai"
+PROVIDER_AZURE = "azure"
 JSON_ONLY_INSTRUCTION = (
     "You must return exactly one JSON object and nothing else. "
     "Do not use markdown code fences. "
@@ -31,13 +35,77 @@ def _normalize_base_url(raw_value: str) -> str:
     if not normalized:
         return ""
 
-    if normalized.endswith("/chat/completions"):
-        normalized = normalized[: -len("/chat/completions")]
+    for suffix in ("/openai/v1/chat/completions", "/chat/completions"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
     return normalized.rstrip("/")
 
 
-def _chat_completions_url(base_url: str) -> str:
+def _normalize_provider(raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    aliases = {
+        PROVIDER_OPENAI: PROVIDER_OPENAI,
+        PROVIDER_AZURE: PROVIDER_AZURE,
+        "azure_openai": PROVIDER_AZURE,
+        "azureopenai": PROVIDER_AZURE,
+    }
+    return aliases.get(normalized, "")
+
+
+def _infer_provider(*, provider_override: str | None, base_url_override: str | None) -> str:
+    candidates: list[str] = []
+    if isinstance(provider_override, str):
+        candidates.append(provider_override)
+    candidates.extend(
+        [
+            os.environ.get("ASTROMLAB_LM_PROVIDER", ""),
+            os.environ.get("ASTROMLAB_PROVIDER", ""),
+            os.environ.get("OPENAI_PROVIDER", ""),
+        ]
+    )
+    for candidate in candidates:
+        normalized = _normalize_provider(candidate)
+        if normalized:
+            return normalized
+        if candidate.strip():
+            raise LMClientError(
+                _error_text(
+                    "invalid_provider",
+                    f"unsupported provider {candidate!r}; expected one of ['openai', 'azure']",
+                )
+            )
+
+    endpoint_hint = (
+        base_url_override.strip()
+        if isinstance(base_url_override, str) and base_url_override.strip()
+        else (
+            os.environ.get("ASTROMLAB_ENDPOINT", "").strip()
+            or os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+            or os.environ.get("OPENAI_BASE_URL", "").strip()
+        )
+    ).lower()
+    if ".cognitiveservices.azure.com" in endpoint_hint or ".openai.azure.com" in endpoint_hint:
+        return PROVIDER_AZURE
+
+    if (
+        os.environ.get("ASTROMLAB_API_VERSION", "").strip()
+        or os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
+    ):
+        return PROVIDER_AZURE
+    return PROVIDER_OPENAI
+
+
+def _chat_completions_url(*, provider: str, base_url: str, api_version: str) -> str:
     trimmed = base_url.rstrip("/")
+    if provider == PROVIDER_AZURE:
+        if trimmed.endswith("/openai/v1"):
+            raw_url = f"{trimmed}/chat/completions"
+        else:
+            raw_url = f"{trimmed}/openai/v1/chat/completions"
+        query = urllib_parse.urlencode({"api-version": api_version})
+        return f"{raw_url}?{query}"
+
     if trimmed.endswith("/v1"):
         return f"{trimmed}/chat/completions"
     return f"{trimmed}/v1/chat/completions"
@@ -47,33 +115,67 @@ def _resolve_api_config(
     *,
     api_key_override: str | None,
     base_url_override: str | None,
-) -> tuple[str, str]:
+    provider_override: str | None,
+    api_version_override: str | None,
+) -> tuple[str, str, str, str]:
+    provider = _infer_provider(
+        provider_override=provider_override,
+        base_url_override=base_url_override,
+    )
+
     api_key = api_key_override.strip() if isinstance(api_key_override, str) else ""
     if not api_key:
         api_key = (
             os.environ.get("ASTROMLAB_API_KEY", "").strip()
+            or os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
             or os.environ.get("OPENAI_API_KEY", "").strip()
         )
     if not api_key:
         raise LMClientError(
             _error_text(
                 "missing_api_key",
-                "ASTROMLAB_API_KEY or OPENAI_API_KEY is required for call_openai_json",
+                "ASTROMLAB_API_KEY, AZURE_OPENAI_API_KEY, or OPENAI_API_KEY is required for call_openai_json",
             )
         )
+
+    if provider == PROVIDER_AZURE:
+        endpoint = base_url_override.strip() if isinstance(base_url_override, str) else ""
+        if not endpoint:
+            endpoint = (
+                os.environ.get("ASTROMLAB_ENDPOINT", "").strip()
+                or os.environ.get("AZURE_OPENAI_ENDPOINT", "").strip()
+                or os.environ.get("OPENAI_BASE_URL", "").strip()
+            )
+        normalized_endpoint = _normalize_base_url(endpoint)
+        if not normalized_endpoint:
+            raise LMClientError(
+                _error_text(
+                    "missing_base_url",
+                    "ASTROMLAB_ENDPOINT, AZURE_OPENAI_ENDPOINT, or OPENAI_BASE_URL is required for azure provider",
+                )
+            )
+
+        api_version = api_version_override.strip() if isinstance(api_version_override, str) else ""
+        if not api_version:
+            api_version = (
+                os.environ.get("ASTROMLAB_API_VERSION", "").strip()
+                or os.environ.get("AZURE_OPENAI_API_VERSION", "").strip()
+                or os.environ.get("OPENAI_API_VERSION", "").strip()
+                or DEFAULT_AZURE_OPENAI_API_VERSION
+            )
+        return (provider, api_key, normalized_endpoint, api_version)
 
     base_url = base_url_override.strip() if isinstance(base_url_override, str) else ""
     if not base_url:
         base_url = (
-            os.environ.get("ASTROMLAB_ENDPOINT", "").strip()
-            or os.environ.get("OPENAI_BASE_URL", "").strip()
+            os.environ.get("OPENAI_BASE_URL", "").strip()
+            or os.environ.get("ASTROMLAB_ENDPOINT", "").strip()
             or DEFAULT_OPENAI_BASE_URL
         )
     normalized_base_url = _normalize_base_url(base_url)
     if not normalized_base_url:
         normalized_base_url = DEFAULT_OPENAI_BASE_URL
-
-    return api_key, normalized_base_url
+    return (provider, api_key, normalized_base_url, "")
 
 
 def _strict_json_object(text: str) -> dict[str, Any]:
@@ -158,18 +260,31 @@ def _validate_output_schema(payload: Mapping[str, Any], output_schema: Mapping[s
 
 def _sdk_call(
     *,
+    provider: str,
     api_key: str,
     base_url: str,
+    api_version: str,
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
 ) -> str:
-    try:
-        from openai import OpenAI
-    except Exception as exc:  # noqa: BLE001
-        raise LMClientError(_error_text("sdk_unavailable", str(exc))) from exc
+    if provider == PROVIDER_AZURE:
+        try:
+            from openai import AzureOpenAI
+        except Exception as exc:  # noqa: BLE001
+            raise LMClientError(_error_text("sdk_unavailable", str(exc))) from exc
+        client = AzureOpenAI(
+            azure_endpoint=base_url,
+            api_key=api_key,
+            api_version=api_version,
+        )
+    else:
+        try:
+            from openai import OpenAI
+        except Exception as exc:  # noqa: BLE001
+            raise LMClientError(_error_text("sdk_unavailable", str(exc))) from exc
+        client = OpenAI(base_url=base_url, api_key=api_key)
 
-    client = OpenAI(base_url=base_url, api_key=api_key)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -195,6 +310,7 @@ def _sdk_call(
 
 def _http_call(
     *,
+    provider: str,
     api_key: str,
     chat_completions_url: str,
     model: str,
@@ -209,14 +325,17 @@ def _http_call(
     }
     data = json.dumps(body).encode("utf-8")
 
+    headers = {"Content-Type": "application/json"}
+    if provider == PROVIDER_AZURE:
+        headers["api-key"] = api_key
+    else:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     req = urllib_request.Request(
         chat_completions_url,
         data=data,
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
     )
     try:
         with urllib_request.urlopen(req, timeout=90) as resp:
@@ -267,8 +386,10 @@ def call_openai_json(
     output_schema: Mapping[str, Any] | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    provider: str | None = None,
+    api_version: str | None = None,
 ) -> dict[str, Any]:
-    """Call OpenAI and return a strictly parsed JSON object.
+    """Call OpenAI-compatible chat completions and return a strictly parsed JSON object.
 
     Errors raise LMClientError with stable `lm_client_error[...]` prefixes.
     """
@@ -287,11 +408,17 @@ def call_openai_json(
     except (TypeError, ValueError) as exc:
         raise LMClientError(_error_text("invalid_temperature", str(exc))) from exc
 
-    resolved_api_key, resolved_base_url = _resolve_api_config(
+    resolved_provider, resolved_api_key, resolved_base_url, resolved_api_version = _resolve_api_config(
         api_key_override=api_key,
         base_url_override=base_url,
+        provider_override=provider,
+        api_version_override=api_version,
     )
-    chat_completions_url = _chat_completions_url(resolved_base_url)
+    chat_completions_url = _chat_completions_url(
+        provider=resolved_provider,
+        base_url=resolved_base_url,
+        api_version=resolved_api_version,
+    )
     messages = _messages(
         system_prompt=system_prompt,
         user_payload=user_payload,
@@ -300,8 +427,10 @@ def call_openai_json(
 
     try:
         response_text = _sdk_call(
+            provider=resolved_provider,
             api_key=resolved_api_key,
             base_url=resolved_base_url,
+            api_version=resolved_api_version,
             model=model.strip(),
             temperature=temp,
             messages=messages,
@@ -311,6 +440,7 @@ def call_openai_json(
         if "sdk_unavailable" not in str(sdk_exc):
             raise
         response_text = _http_call(
+            provider=resolved_provider,
             api_key=resolved_api_key,
             chat_completions_url=chat_completions_url,
             model=model.strip(),
