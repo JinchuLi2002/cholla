@@ -1,0 +1,54 @@
+name: Phase3D-CPU-Smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  phase3d-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml
+
+      - name: Run Phase 3D smoke (mock backend)
+        run: |
+          set -euo pipefail
+          python -m agent.controller.run_phase3c --config configs/phase3c_ci_smoke.yaml | tee phase3d_smoke.log
+          grep -q "PHASE3D_PASS" phase3d_smoke.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          bundle_path = ""
+          for raw_line in Path("phase3d_smoke.log").read_text(encoding="utf-8").splitlines():
+              line = raw_line.strip()
+              if not (line.startswith("{") and line.endswith("}")):
+                  continue
+              try:
+                  payload = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              candidate = payload.get("experiment_bundle_path")
+              if isinstance(candidate, str) and candidate.strip():
+                  bundle_path = candidate.strip()
+          if not bundle_path:
+              raise SystemExit("failed to extract experiment_bundle_path from phase3d_smoke.log")
+          Path("phase3d_bundle_path.txt").write_text(bundle_path + "\n", encoding="utf-8")
+          print(f"BUNDLE_PATH={bundle_path}")
+          PY
+
+      - name: Replay-only verification
+        run: |
+          set -euo pipefail
+          BUNDLE_PATH="$(cat phase3d_bundle_path.txt)"
+          python -m agent.controller.run_phase3c --replay_only "${BUNDLE_PATH}"

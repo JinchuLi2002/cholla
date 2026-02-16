@@ -88,6 +88,42 @@ def _format_param_value(value: Any) -> str:
     return str(value)
 
 
+def _agent_attr(agent_obj: Any, attr_name: str) -> Any:
+    value = getattr(agent_obj, attr_name, None)
+    if value is not None:
+        return value
+    base_obj = getattr(agent_obj, "base", None)
+    return getattr(base_obj, attr_name, None)
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return int(value)
+    return None
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _optional_non_empty_str(value: Any) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _agent_max_attempts(agent_obj: Any) -> int | None:
+    for attr_name in ("max_attempts", "stability_attempts"):
+        value = _optional_int(_agent_attr(agent_obj, attr_name))
+        if value is not None:
+            return value
+    return None
+
+
 def _render_params_text(template_text: str, overrides: Mapping[str, Any]) -> str:
     rendered_lines: list[str] = []
     remaining = {str(key): _format_param_value(value) for key, value in overrides.items()}
@@ -170,6 +206,9 @@ class HybridController:
         walltime_budget_sec: float | None = None,
         max_failures: int = 1,
         require_live_lm: bool = True,
+        tool_backend: str = "real",
+        bundle_metadata: Mapping[str, Any] | None = None,
+        effective_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.summarizer = summarizer
@@ -187,6 +226,11 @@ class HybridController:
         self.walltime_budget_sec = float(walltime_budget_sec) if walltime_budget_sec is not None else None
         self.max_failures = int(max_failures)
         self.require_live_lm = bool(require_live_lm)
+        self.tool_backend = tool_backend.strip().lower() if isinstance(tool_backend, str) else ""
+        if self.tool_backend not in {"real", "mock"}:
+            raise ValueError(f"tool_backend must be one of ['real', 'mock'], got {tool_backend!r}")
+        self.bundle_metadata = dict(bundle_metadata) if isinstance(bundle_metadata, Mapping) else {}
+        self.effective_config = dict(effective_config) if isinstance(effective_config, Mapping) else None
 
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
@@ -1232,6 +1276,18 @@ class HybridController:
         bundle_dir = self._controller_bundle_dir(experiment_id)
         bundle_dir.mkdir(parents=True, exist_ok=True)
 
+        planner_model = _optional_non_empty_str(_agent_attr(self.planner, "model"))
+        summarizer_model = _optional_non_empty_str(_agent_attr(self.summarizer, "model"))
+        lm_model = planner_model or summarizer_model
+
+        planner_temperature = _optional_float(_agent_attr(self.planner, "temperature"))
+        summarizer_temperature = _optional_float(_agent_attr(self.summarizer, "temperature"))
+        lm_temperature = planner_temperature if planner_temperature is not None else summarizer_temperature
+
+        planner_attempts = _agent_max_attempts(self.planner)
+        summarizer_attempts = _agent_max_attempts(self.summarizer)
+        max_lm_attempts = planner_attempts if planner_attempts is not None else summarizer_attempts
+
         config = {
             "experiment_id": experiment_id,
             "controller_run_id": self.controller_run_id,
@@ -1251,13 +1307,31 @@ class HybridController:
                 "summarizer": f"{type(self.summarizer).__module__}.{type(self.summarizer).__name__}",
                 "planner": f"{type(self.planner).__module__}.{type(self.planner).__name__}",
             },
+            "tool_backend": self.tool_backend,
+            "head_sha": _optional_non_empty_str(self.bundle_metadata.get("head_sha")),
+            "HEAD_SHA": _optional_non_empty_str(self.bundle_metadata.get("head_sha")),
+            "controller_version": _optional_non_empty_str(self.bundle_metadata.get("controller_version")),
+            "lm_model": lm_model,
+            "lm_temperature": lm_temperature,
+            "max_lm_attempts": max_lm_attempts,
+            "acceptance_replay_strict": bool(self.bundle_metadata.get("acceptance_replay_strict")),
+            "cli_invocation": _optional_non_empty_str(self.bundle_metadata.get("cli_invocation")),
         }
+        config_effective_path = bundle_dir / "config_effective.yaml"
+        if self.effective_config is not None:
+            config["config_effective_path"] = "config_effective.yaml"
+
         _write_json(bundle_dir / "config.json", config)
         (bundle_dir / "history_controller.jsonl").write_text(_jsonl_text(history_records), encoding="utf-8")
         (bundle_dir / "param_space.yaml").write_text(
             yaml.safe_dump(dict(param_space), sort_keys=True),
             encoding="utf-8",
         )
+        if self.effective_config is not None:
+            config_effective_path.write_text(
+                yaml.safe_dump(dict(self.effective_config), sort_keys=True),
+                encoding="utf-8",
+            )
 
         iteration_records = [
             record
@@ -1287,6 +1361,15 @@ class HybridController:
             "iterations_total": len(iteration_records),
             "termination_reason": termination_reason,
             "run_dir": str(run_dir),
+            "head_sha": _optional_non_empty_str(self.bundle_metadata.get("head_sha")),
+            "HEAD_SHA": _optional_non_empty_str(self.bundle_metadata.get("head_sha")),
+            "controller_version": _optional_non_empty_str(self.bundle_metadata.get("controller_version")),
+            "lm_model": lm_model,
+            "lm_temperature": lm_temperature,
+            "max_lm_attempts": max_lm_attempts,
+            "acceptance_replay_strict": bool(self.bundle_metadata.get("acceptance_replay_strict")),
+            "cli_invocation": _optional_non_empty_str(self.bundle_metadata.get("cli_invocation")),
+            "tool_backend": self.tool_backend,
             "bundle_files": {
                 "config": "config.json",
                 "history": "history_controller.jsonl",
@@ -1295,6 +1378,8 @@ class HybridController:
                 "summary": "summary.json",
             },
         }
+        if self.effective_config is not None:
+            summary_payload["bundle_files"]["config_effective"] = "config_effective.yaml"
         _write_json(bundle_dir / "summary.json", summary_payload)
         return bundle_dir
 
@@ -1483,15 +1568,19 @@ class HybridController:
                     if replay_params_diff:
                         raise ValueError(f"replay mismatch iteration {iteration}: {replay_params_diff}")
 
-                    expected_run_id = f"{controller_run_id}_iter_{iteration:04d}"
                     history_run_id = record.get("RUN_ID")
-                    if history_run_id != expected_run_id:
+                    if not isinstance(history_run_id, str) or not history_run_id:
                         raise ValueError(
                             "replay mismatch iteration "
-                            f"{iteration}: RUN_ID history mismatch expected {expected_run_id!r}, got {history_run_id!r}"
+                            f"{iteration}: missing history RUN_ID"
                         )
 
                     replay_run_id = self._run_id_from_tool_results(replay_tool_results)
+                    if not isinstance(replay_run_id, str) or not replay_run_id:
+                        raise ValueError(
+                            "replay mismatch iteration "
+                            f"{iteration}: missing replay RUN_ID from run_cholla result"
+                        )
                     if replay_run_id != history_run_id:
                         raise ValueError(
                             "replay mismatch iteration "
@@ -1499,6 +1588,11 @@ class HybridController:
                         )
 
                     stored_tool_run_id = self._run_id_from_tool_results(observed_tool_results)
+                    if not isinstance(stored_tool_run_id, str) or not stored_tool_run_id:
+                        raise ValueError(
+                            "replay mismatch iteration "
+                            f"{iteration}: missing stored RUN_ID in run_cholla result"
+                        )
                     if stored_tool_run_id != history_run_id:
                         raise ValueError(
                             "replay mismatch iteration "

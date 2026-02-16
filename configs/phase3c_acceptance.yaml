@@ -1,0 +1,31 @@
+lm:
+  enabled: true
+  provider: azure
+  model: gpt-5-mini
+  temperature: 1.0
+  max_lm_attempts: 5
+  azure_env_var_names:
+    api_key: AZURE_OPENAI_API_KEY
+    endpoint: AZURE_OPENAI_ENDPOINT
+    api_version: AZURE_OPENAI_API_VERSION
+  openai_env_var_names:
+    api_key: OPENAI_API_KEY
+    base_url: OPENAI_BASE_URL
+
+controller:
+  seed: 123
+  max_iterations: 3
+  min_success_iters: 3
+  max_failures: 1
+  budgets:
+    max_tool_calls: 12
+    walltime_budget_sec: 1800.0
+  convergence:
+    lookback_k: 5
+    flat_tol: 1.0e-6
+
+param_space_path: agent/spec/param_space_v0.yaml
+out_root: r
+tool_backend: real
+objective: maximize_metric_scalar
+history_path: agent/history/history.jsonl

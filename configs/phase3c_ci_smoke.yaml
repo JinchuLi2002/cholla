@@ -1,0 +1,26 @@
+lm:
+  enabled: false
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.0
+  max_lm_attempts: 1
+
+controller:
+  seed: 7
+  max_iterations: 1
+  min_success_iters: 1
+  max_failures: 1
+  budgets:
+    max_tool_calls: 4
+    walltime_budget_sec: 60.0
+  convergence:
+    lookback_k: 3
+    flat_tol: 1.0e-6
+
+param_space_path: agent/spec/param_space_v0.yaml
+out_root: r
+tool_backend: mock
+objective: ci_smoke_wiring
+history_path: agent/history/history_phase3c_ci_smoke.jsonl
+experiment_id: ctrl_phase3c_ci_smoke
+controller_run_id: ctrl_phase3c_ci_smoke_run

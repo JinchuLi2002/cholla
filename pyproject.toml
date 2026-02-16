@@ -15,7 +15,8 @@ version = "0.1"
 license = "MIT"
 dependencies = [
     "numpy",
-    "h5py"
+    "h5py",
+    "pyyaml",
 ]
 requires-python = ">=3.10"
 
@@ -88,4 +89,3 @@ exclude = [
     "docs/sphinx/PythonExamples/**",
     "tools/analyze_tidy_checks.py"
 ]
-

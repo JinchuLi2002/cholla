@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from agent.tools.registry import TOOLS
+from agent.tools.registry import TOOLS, tool_registry_for_backend
 
-__all__ = ["TOOLS"]
+__all__ = ["TOOLS", "tool_registry_for_backend"]

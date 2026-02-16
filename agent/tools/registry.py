@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from agent.tools.schema import (
     COMPUTE_METRIC_V3_INPUT_SCHEMA,
     COMPUTE_METRIC_V3_OUTPUT_SCHEMA,
@@ -58,3 +60,21 @@ TOOLS = {
         "callable": "agent.tools.validate_params:validate_params",
     },
 }
+
+
+def tool_registry_for_backend(tool_backend: str) -> dict[str, dict[str, object]]:
+    """Return a registry copy configured for the selected backend implementation."""
+
+    backend = tool_backend.strip().lower()
+    if backend not in {"real", "mock"}:
+        raise ValueError(f"unknown tool backend: {tool_backend!r} (expected 'real' or 'mock')")
+
+    registry: dict[str, dict[str, object]] = deepcopy(TOOLS)
+    if backend == "mock":
+        registry["run_cholla"]["callable"] = "agent.tools.mock_backend:run_cholla"
+        registry["compute_metric"]["callable"] = "agent.tools.mock_backend:compute_metric"
+        registry["compute_metric_v3"]["callable"] = "agent.tools.mock_backend:compute_metric"
+    return registry
+
+
+__all__ = ["TOOLS", "tool_registry_for_backend"]
