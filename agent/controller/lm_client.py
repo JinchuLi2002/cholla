@@ -26,6 +26,21 @@ class LMClientError(RuntimeError):
     """Raised when LM invocation or strict JSON parsing fails."""
 
 
+class LMNonDeterminismError(LMClientError):
+    """Raised when repeated LM calls with identical input disagree."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_outputs: list[str],
+        canonical_outputs: list[str],
+    ) -> None:
+        super().__init__(message)
+        self.raw_outputs = list(raw_outputs)
+        self.canonical_outputs = list(canonical_outputs)
+
+
 def _error_text(code: str, detail: str) -> str:
     return f"lm_client_error[{code}]: {detail}"
 
@@ -377,7 +392,46 @@ def _http_call(
     return text
 
 
-def call_openai_json(
+def _canonical_json(payload: Mapping[str, Any]) -> str:
+    return json.dumps(dict(payload), sort_keys=True, separators=(",", ":"))
+
+
+def _request_raw_response_text(
+    *,
+    provider: str,
+    api_key: str,
+    base_url: str,
+    api_version: str,
+    chat_completions_url: str,
+    model: str,
+    temperature: float,
+    messages: list[dict[str, str]],
+) -> str:
+    try:
+        return _sdk_call(
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            api_version=api_version,
+            model=model,
+            temperature=temperature,
+            messages=messages,
+        )
+    except LMClientError as sdk_exc:
+        # Fall back to direct HTTP only when SDK is unavailable.
+        if "sdk_unavailable" not in str(sdk_exc):
+            raise
+        return _http_call(
+            provider=provider,
+            api_key=api_key,
+            chat_completions_url=chat_completions_url,
+            model=model,
+            temperature=temperature,
+            messages=messages,
+        )
+
+
+def call_llm_json_stable(
     model: str,
     system_prompt: str,
     user_payload: dict[str, Any],
@@ -388,11 +442,9 @@ def call_openai_json(
     api_key: str | None = None,
     provider: str | None = None,
     api_version: str | None = None,
+    attempts: int = 2,
 ) -> dict[str, Any]:
-    """Call OpenAI-compatible chat completions and return a strictly parsed JSON object.
-
-    Errors raise LMClientError with stable `lm_client_error[...]` prefixes.
-    """
+    """Call LM multiple times and require canonical JSON equivalence."""
 
     if not isinstance(model, str) or not model.strip():
         raise LMClientError(_error_text("invalid_model", "model must be a non-empty string"))
@@ -402,6 +454,8 @@ def call_openai_json(
         raise LMClientError(_error_text("invalid_user_payload", "user_payload must be a JSON object"))
     if output_schema is None:
         raise LMClientError(_error_text("missing_output_schema", "output_schema must be provided"))
+    if not isinstance(attempts, int) or attempts < 1:
+        raise LMClientError(_error_text("invalid_attempts", "attempts must be an integer >= 1"))
 
     try:
         temp = float(temperature)
@@ -425,32 +479,98 @@ def call_openai_json(
         output_schema=output_schema,
     )
 
-    try:
-        response_text = _sdk_call(
+    raw_outputs: list[str] = []
+    parsed_outputs: list[dict[str, Any]] = []
+    canonical_outputs: list[str] = []
+
+    for _attempt_idx in range(attempts):
+        raw_text = _request_raw_response_text(
             provider=resolved_provider,
             api_key=resolved_api_key,
             base_url=resolved_base_url,
             api_version=resolved_api_version,
-            model=model.strip(),
-            temperature=temp,
-            messages=messages,
-        )
-    except LMClientError as sdk_exc:
-        # Fall back to direct HTTP only when SDK is unavailable.
-        if "sdk_unavailable" not in str(sdk_exc):
-            raise
-        response_text = _http_call(
-            provider=resolved_provider,
-            api_key=resolved_api_key,
             chat_completions_url=chat_completions_url,
             model=model.strip(),
             temperature=temp,
             messages=messages,
         )
+        raw_outputs.append(raw_text)
+        parsed = _strict_json_object(raw_text)
+        _validate_output_schema(parsed, output_schema)
+        parsed_outputs.append(parsed)
+        canonical_outputs.append(_canonical_json(parsed))
 
-    parsed = _strict_json_object(response_text)
-    _validate_output_schema(parsed, output_schema)
-    return parsed
+    mismatch_index: int | None = None
+    stable = True
+    baseline = canonical_outputs[0]
+    for idx, candidate in enumerate(canonical_outputs[1:], start=1):
+        if candidate != baseline:
+            mismatch_index = idx
+            stable = False
+            break
+
+    if not stable:
+        raise LMNonDeterminismError(
+            _error_text(
+                "non_deterministic_output",
+                f"stable equivalence failed across attempts={attempts}; mismatch_at={mismatch_index}",
+            ),
+            raw_outputs=raw_outputs,
+            canonical_outputs=canonical_outputs,
+        )
+
+    return {
+        "output": parsed_outputs[0],
+        "raw_outputs": raw_outputs,
+        "canonical_outputs": canonical_outputs,
+        "provider": resolved_provider,
+        "base_url": resolved_base_url,
+        "api_version": resolved_api_version or None,
+        "model": model.strip(),
+        "temperature": temp,
+        "stability_check_result": {
+            "attempts": attempts,
+            "passed": True,
+            "mismatch_index": mismatch_index,
+        },
+    }
 
 
-__all__ = ["LMClientError", "call_openai_json"]
+def call_openai_json(
+    model: str,
+    system_prompt: str,
+    user_payload: dict[str, Any],
+    temperature: float = 0.0,
+    *,
+    output_schema: Mapping[str, Any] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    provider: str | None = None,
+    api_version: str | None = None,
+) -> dict[str, Any]:
+    """Compatibility wrapper for one-shot JSON call."""
+
+    stable = call_llm_json_stable(
+        model=model,
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        temperature=temperature,
+        output_schema=output_schema,
+        base_url=base_url,
+        api_key=api_key,
+        provider=provider,
+        api_version=api_version,
+        attempts=1,
+    )
+    output = stable.get("output")
+    if not isinstance(output, Mapping):
+        raise LMClientError(_error_text("invalid_output", "stable LM result missing output object"))
+    return dict(output)
+
+
+__all__ = [
+    "LMClientError",
+    "LMNonDeterminismError",
+    "call_llm_json_stable",
+    "call_openai_json",
+]

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from agent.controller.lm_client import LMClientError, call_openai_json
+from agent.controller.lm_client import LMClientError, call_llm_json_stable
 from agent.controller.specs import (
     SUMMARIZER_OUTPUT_V0_SCHEMA,
     SchemaValidationError,
@@ -86,22 +86,63 @@ class SummarizerLMAgent:
     """Call LM with strict JSON output and normalize into SummarySpecV0."""
 
     model: str = "gpt-4o-mini"
+    temperature: float = 1.0
+    stability_attempts: int = 2
     lookback_k: int = 5
     flat_tol: float = 1e-6
     system_prompt: str = DEFAULT_SUMMARIZER_SYSTEM_PROMPT
+    last_lm_trace: dict[str, Any] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def summarize(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         summarizer_input = self._normalize_input(payload)
 
         try:
-            lm_output = call_openai_json(
+            stable_result = call_llm_json_stable(
                 model=self.model,
                 system_prompt=self.system_prompt,
                 user_payload=summarizer_input,
-                temperature=0.0,
+                temperature=self.temperature,
                 output_schema=SUMMARIZER_OUTPUT_V0_SCHEMA,
+                attempts=self.stability_attempts,
+            )
+            lm_output_raw = stable_result.get("output")
+            if not isinstance(lm_output_raw, Mapping):
+                raise SummarizerLMError(_err("invalid_lm_output", "stable output missing object payload"))
+            lm_output = dict(lm_output_raw)
+            self._set_trace(
+                {
+                    "live_lm_used": True,
+                    "status": "ok",
+                    "error": None,
+                    "model": stable_result.get("model", self.model),
+                    "temperature": stable_result.get("temperature", self.temperature),
+                    "provider": stable_result.get("provider"),
+                    "base_url": stable_result.get("base_url"),
+                    "api_version": stable_result.get("api_version"),
+                    "raw_outputs": list(stable_result.get("raw_outputs", [])),
+                    "canonical_outputs": list(stable_result.get("canonical_outputs", [])),
+                    "stability_check_result": dict(stable_result.get("stability_check_result", {})),
+                }
             )
         except LMClientError as exc:
+            self._set_trace(
+                {
+                    "live_lm_used": False,
+                    "status": "failed",
+                    "error": str(exc),
+                    "model": self.model,
+                    "temperature": float(self.temperature),
+                    "provider": None,
+                    "base_url": None,
+                    "api_version": None,
+                    "raw_outputs": list(getattr(exc, "raw_outputs", [])),
+                    "canonical_outputs": list(getattr(exc, "canonical_outputs", [])),
+                    "stability_check_result": {
+                        "attempts": self.stability_attempts,
+                        "passed": False,
+                    },
+                }
+            )
             raise SummarizerLMError(_err("lm_call_failed", str(exc))) from exc
 
         try:
@@ -209,6 +250,9 @@ class SummarizerLMAgent:
             },
             "param_space": param_space,
         }
+
+    def _set_trace(self, trace: Mapping[str, Any]) -> None:
+        object.__setattr__(self, "last_lm_trace", dict(trace))
 
 
 def _extract_history_records(*, payload: Mapping[str, Any], state: Mapping[str, Any]) -> list[dict[str, Any]]:

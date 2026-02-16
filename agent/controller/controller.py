@@ -45,6 +45,12 @@ def _write_json(path: Path, payload: dict[str, Any] | list[dict[str, Any]]) -> N
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _text_for_artifact(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True, indent=2, default=str)
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -162,6 +168,8 @@ class HybridController:
         max_iterations: int = 1,
         max_tool_calls: int = 4,
         walltime_budget_sec: float | None = None,
+        max_failures: int = 1,
+        require_live_lm: bool = True,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
         self.summarizer = summarizer
@@ -177,11 +185,15 @@ class HybridController:
         self.max_iterations = int(max_iterations)
         self.max_tool_calls = int(max_tool_calls)
         self.walltime_budget_sec = float(walltime_budget_sec) if walltime_budget_sec is not None else None
+        self.max_failures = int(max_failures)
+        self.require_live_lm = bool(require_live_lm)
 
         if self.max_iterations < 1:
             raise ValueError("max_iterations must be >= 1")
         if self.max_tool_calls < 0:
             raise ValueError("max_tool_calls must be >= 0")
+        if self.max_failures < 1:
+            raise ValueError("max_failures must be >= 1")
         if self.walltime_budget_sec is not None and self.walltime_budget_sec < 0:
             raise ValueError("walltime_budget_sec must be >= 0 when provided")
 
@@ -455,6 +467,12 @@ class HybridController:
             if iteration_error is not None:
                 last_error = iteration_error
 
+            if iteration_status == "failed":
+                if failed_iterations >= self.max_failures:
+                    termination_reason = "max_failures_reached"
+                    break
+                continue
+
             if iteration_termination:
                 termination_reason = iteration_termination
                 break
@@ -507,7 +525,10 @@ class HybridController:
             "run_dir": str(run_dir),
             "history_path": str(self.history_writer.path),
             "iterations_completed": iterations_completed,
+            "successful_iterations": max(iterations_completed - failed_iterations, 0),
             "failed_iterations": failed_iterations,
+            "max_failures": self.max_failures,
+            "require_live_lm": self.require_live_lm,
             "tool_calls_used": tool_calls_used,
             "termination_reason": termination_reason,
         }
@@ -521,6 +542,7 @@ class HybridController:
             raise TypeError("summarizer must be callable or expose summarize(payload)")
         if not isinstance(response, Mapping):
             raise TypeError(f"summarizer returned non-object payload: {type(response).__name__}")
+        self._enforce_live_lm(agent_kind="summarizer")
         return dict(response)
 
     def _invoke_planner(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -532,6 +554,7 @@ class HybridController:
             raise TypeError("planner must be callable or expose plan(payload)")
         if not isinstance(response, Mapping):
             raise TypeError(f"planner returned non-object payload: {type(response).__name__}")
+        self._enforce_live_lm(agent_kind="planner")
         return dict(response)
 
     def _invoke_tool(self, *, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -923,6 +946,49 @@ class HybridController:
     def _controller_tasks_dir(self, experiment_id: str) -> Path:
         return self._experiment_bundle_dir(experiment_id) / "tasks"
 
+    def _agent_obj(self, agent_kind: str) -> Any:
+        if agent_kind == "planner":
+            return self.planner
+        if agent_kind == "summarizer":
+            return self.summarizer
+        raise ValueError(f"unknown agent_kind: {agent_kind!r}")
+
+    def _agent_lm_trace(self, agent_kind: str) -> dict[str, Any]:
+        agent_obj = self._agent_obj(agent_kind)
+
+        trace_raw = getattr(agent_obj, "last_lm_trace", None)
+        if isinstance(trace_raw, Mapping):
+            return dict(trace_raw)
+
+        base_obj = getattr(agent_obj, "base", None)
+        base_trace_raw = getattr(base_obj, "last_lm_trace", None)
+        if isinstance(base_trace_raw, Mapping):
+            return dict(base_trace_raw)
+        return {}
+
+    def _enforce_live_lm(self, *, agent_kind: str) -> None:
+        if not self.require_live_lm:
+            return
+
+        trace = self._agent_lm_trace(agent_kind)
+        if not trace:
+            raise RuntimeError(f"{agent_kind}_live_lm_required: missing last_lm_trace")
+
+        if trace.get("live_lm_used") is not True:
+            error = trace.get("error")
+            raise RuntimeError(f"{agent_kind}_live_lm_required: live LM not used ({error})")
+
+        if str(trace.get("status", "")).lower() != "ok":
+            error = trace.get("error")
+            raise RuntimeError(f"{agent_kind}_live_lm_required: LM status not ok ({error})")
+
+        stability_raw = trace.get("stability_check_result")
+        stability = dict(stability_raw) if isinstance(stability_raw, Mapping) else {}
+        if stability.get("passed") is not True:
+            raise RuntimeError(
+                f"{agent_kind}_live_lm_required: stability check failed ({stability})"
+            )
+
     def _agent_card(self, agent_kind: str) -> dict[str, Any]:
         if not hasattr(self, "_agent_cards_cache"):
             self._agent_cards_cache: dict[str, dict[str, Any]] = {}
@@ -950,12 +1016,7 @@ class HybridController:
         agent_kind: str,
         input_payload: Mapping[str, Any],
     ) -> dict[str, Any]:
-        if agent_kind == "planner":
-            agent_obj = self.planner
-        elif agent_kind == "summarizer":
-            agent_obj = self.summarizer
-        else:
-            raise ValueError(f"unknown agent_kind: {agent_kind!r}")
+        agent_obj = self._agent_obj(agent_kind)
 
         model_raw = getattr(agent_obj, "model", None)
         model = model_raw.strip() if isinstance(model_raw, str) and model_raw.strip() else None
@@ -963,8 +1024,6 @@ class HybridController:
         temp_raw = getattr(agent_obj, "temperature", None)
         if isinstance(temp_raw, (int, float)) and not isinstance(temp_raw, bool):
             temperature: float | None = float(temp_raw)
-        elif model is not None:
-            temperature = 0.0
         else:
             temperature = None
 
@@ -978,10 +1037,24 @@ class HybridController:
             json.dumps(hash_payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         ).hexdigest()
 
+        lm_trace = self._agent_lm_trace(agent_kind)
+        stability_raw = lm_trace.get("stability_check_result")
+        stability = dict(stability_raw) if isinstance(stability_raw, Mapping) else None
+        raw_outputs = lm_trace.get("raw_outputs")
+        raw_outputs_list = list(raw_outputs) if isinstance(raw_outputs, list) else []
+
         return {
             "model": model,
             "temperature": temperature,
             "prompt_input_hash": prompt_input_hash,
+            "provider": lm_trace.get("provider"),
+            "base_url": lm_trace.get("base_url"),
+            "api_version": lm_trace.get("api_version"),
+            "live_lm_used": lm_trace.get("live_lm_used"),
+            "lm_status": lm_trace.get("status"),
+            "lm_error": lm_trace.get("error"),
+            "stability_check_result": stability,
+            "raw_outputs": raw_outputs_list,
         }
 
     def _write_agent_task_envelope(
@@ -1011,6 +1084,15 @@ class HybridController:
         card = self._agent_card(agent_kind)
         audit = self._agent_runtime_audit(agent_kind=agent_kind, input_payload=input_payload)
         task_name = f"task_{iteration}_{agent_kind}"
+        lm_raw_output_artifacts: list[str] = []
+        raw_outputs = audit.get("raw_outputs")
+        if isinstance(raw_outputs, list):
+            for idx, raw_output in enumerate(raw_outputs):
+                raw_path = tasks_dir / f"{task_name}_lm_raw_{idx}.txt"
+                raw_path.write_text(_text_for_artifact(raw_output), encoding="utf-8")
+                lm_raw_output_artifacts.append(str(raw_path))
+                output_paths.append(str(raw_path))
+
         envelope = {
             "task_id": f"{self.experiment_id}:{self.controller_run_id}:{task_name}",
             "experiment_id": self.experiment_id,
@@ -1026,6 +1108,14 @@ class HybridController:
             "model": audit["model"],
             "temperature": audit["temperature"],
             "prompt_input_hash": audit["prompt_input_hash"],
+            "provider": audit["provider"],
+            "base_url": audit["base_url"],
+            "api_version": audit["api_version"],
+            "live_lm_used": audit["live_lm_used"],
+            "lm_status": audit["lm_status"],
+            "lm_error": audit["lm_error"],
+            "stability_check_result": audit["stability_check_result"],
+            "lm_raw_output_artifacts": lm_raw_output_artifacts,
         }
         task_path = tasks_dir / f"{task_name}.json"
         _write_json(task_path, envelope)
@@ -1053,6 +1143,8 @@ class HybridController:
             "seed": seed,
             "max_iterations": self.max_iterations,
             "max_tool_calls": self.max_tool_calls,
+            "max_failures": self.max_failures,
+            "require_live_lm": self.require_live_lm,
             "walltime_budget_sec": self.walltime_budget_sec,
             "param_space_source_path": str(self.param_space_path),
             "template_params_path": str(template_params_path),
