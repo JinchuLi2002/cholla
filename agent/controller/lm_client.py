@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -28,19 +28,19 @@ class LMClientError(RuntimeError):
     """Raised when LM invocation or strict JSON parsing fails."""
 
 
-class LMNonDeterminismError(LMClientError):
-    """Raised when repeated LM calls with identical input disagree."""
+class LMOutputInvalidError(LMClientError):
+    """Raised when all retry attempts fail strict JSON/schema validation."""
 
     def __init__(
         self,
         message: str,
         *,
         raw_outputs: list[str],
-        canonical_outputs: list[str],
+        attempt_summaries: list[dict[str, Any]],
     ) -> None:
         super().__init__(message)
         self.raw_outputs = list(raw_outputs)
-        self.canonical_outputs = list(canonical_outputs)
+        self.attempt_summaries = [dict(entry) for entry in attempt_summaries]
 
 
 def _error_text(code: str, detail: str) -> str:
@@ -466,10 +466,6 @@ def _http_call(
     return text
 
 
-def _canonical_json(payload: Mapping[str, Any]) -> str:
-    return json.dumps(dict(payload), sort_keys=True, separators=(",", ":"))
-
-
 def _request_raw_response_text(
     *,
     provider: str,
@@ -508,7 +504,7 @@ def _request_raw_response_text(
         )
 
 
-def call_llm_json_stable(
+def call_llm_json_retry(
     model: str,
     system_prompt: str,
     user_payload: dict[str, Any],
@@ -519,10 +515,11 @@ def call_llm_json_stable(
     api_key: str | None = None,
     provider: str | None = None,
     api_version: str | None = None,
-    attempts: int = 2,
+    attempts: int = 5,
     seed: int | None = None,
+    extra_validator: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Call LM multiple times and require canonical JSON equivalence."""
+    """Call LM with bounded retries and return the first schema-valid JSON object."""
 
     if not isinstance(model, str) or not model.strip():
         raise LMClientError(_error_text("invalid_model", "model must be a non-empty string"))
@@ -564,62 +561,128 @@ def call_llm_json_stable(
     )
 
     raw_outputs: list[str] = []
-    parsed_outputs: list[dict[str, Any]] = []
-    canonical_outputs: list[str] = []
+    attempt_summaries: list[dict[str, Any]] = []
 
-    for _attempt_idx in range(attempts):
-        raw_text = _request_raw_response_text(
-            provider=resolved_provider,
-            api_key=resolved_api_key,
-            base_url=resolved_base_url,
-            api_version=resolved_api_version,
-            chat_completions_url=chat_completions_url,
-            model=model.strip(),
-            temperature=temp,
-            messages=messages,
-            seed=resolved_seed,
-        )
+    for attempt_idx in range(attempts):
+        summary: dict[str, Any] = {
+            "attempt_index": attempt_idx,
+            "status": "failed",
+            "raw_output_index": None,
+            "error": None,
+            "json_parse_ok": False,
+            "schema_valid": False,
+            "constraints_valid": False,
+            "accepted": False,
+        }
+
+        try:
+            raw_text = _request_raw_response_text(
+                provider=resolved_provider,
+                api_key=resolved_api_key,
+                base_url=resolved_base_url,
+                api_version=resolved_api_version,
+                chat_completions_url=chat_completions_url,
+                model=model.strip(),
+                temperature=temp,
+                messages=messages,
+                seed=resolved_seed,
+            )
+        except LMClientError as exc:
+            summary["status"] = "request_error"
+            summary["error"] = str(exc)
+            attempt_summaries.append(summary)
+            continue
+
+        raw_output_index = len(raw_outputs)
         raw_outputs.append(raw_text)
-        parsed = _strict_json_object(raw_text)
-        _validate_output_schema(parsed, output_schema)
-        parsed_outputs.append(parsed)
-        canonical_outputs.append(_canonical_json(parsed))
+        summary["raw_output_index"] = raw_output_index
 
-    mismatch_index: int | None = None
-    stable = True
-    baseline = canonical_outputs[0]
-    for idx, candidate in enumerate(canonical_outputs[1:], start=1):
-        if candidate != baseline:
-            mismatch_index = idx
-            stable = False
-            break
+        try:
+            parsed = _strict_json_object(raw_text)
+            summary["json_parse_ok"] = True
+        except LMClientError as exc:
+            summary["status"] = "invalid_json"
+            summary["error"] = str(exc)
+            attempt_summaries.append(summary)
+            continue
 
-    if not stable:
-        raise LMNonDeterminismError(
-            _error_text(
-                "non_deterministic_output",
-                f"stable equivalence failed across attempts={attempts}; mismatch_at={mismatch_index}",
-            ),
-            raw_outputs=raw_outputs,
-            canonical_outputs=canonical_outputs,
-        )
+        try:
+            _validate_output_schema(parsed, output_schema)
+            summary["schema_valid"] = True
+        except LMClientError as exc:
+            summary["status"] = "schema_validation_failed"
+            summary["error"] = str(exc)
+            attempt_summaries.append(summary)
+            continue
 
-    return {
-        "output": parsed_outputs[0],
-        "raw_outputs": raw_outputs,
-        "canonical_outputs": canonical_outputs,
-        "provider": resolved_provider,
-        "base_url": resolved_base_url,
-        "api_version": resolved_api_version or None,
-        "model": model.strip(),
-        "temperature": temp,
-        "seed": resolved_seed,
-        "stability_check_result": {
-            "attempts": attempts,
-            "passed": True,
-            "mismatch_index": mismatch_index,
-        },
-    }
+        try:
+            if extra_validator is not None:
+                extra_validator(parsed)
+            summary["constraints_valid"] = True
+        except Exception as exc:  # noqa: BLE001
+            summary["status"] = "constraint_validation_failed"
+            summary["error"] = str(exc)
+            attempt_summaries.append(summary)
+            continue
+
+        summary["status"] = "accepted"
+        summary["accepted"] = True
+        attempt_summaries.append(summary)
+        return {
+            "output": dict(parsed),
+            "raw_outputs": raw_outputs,
+            "attempt_summaries": attempt_summaries,
+            "accepted_attempt_index": attempt_idx,
+            "max_attempts": attempts,
+            "provider": resolved_provider,
+            "base_url": resolved_base_url,
+            "api_version": resolved_api_version or None,
+            "model": model.strip(),
+            "temperature": temp,
+            "seed": resolved_seed,
+        }
+
+    raise LMOutputInvalidError(
+        _error_text(
+            "output_invalid_after_retries",
+            f"all attempts exhausted without valid output (attempts={attempts})",
+        ),
+        raw_outputs=raw_outputs,
+        attempt_summaries=attempt_summaries,
+    )
+
+
+def call_llm_json_stable(
+    model: str,
+    system_prompt: str,
+    user_payload: dict[str, Any],
+    temperature: float = 0.0,
+    *,
+    output_schema: Mapping[str, Any] | None = None,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    provider: str | None = None,
+    api_version: str | None = None,
+    attempts: int = 5,
+    seed: int | None = None,
+    extra_validator: Callable[[Mapping[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Backward-compatible alias to retry-until-valid behavior."""
+
+    return call_llm_json_retry(
+        model=model,
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        temperature=temperature,
+        output_schema=output_schema,
+        base_url=base_url,
+        api_key=api_key,
+        provider=provider,
+        api_version=api_version,
+        attempts=attempts,
+        seed=seed,
+        extra_validator=extra_validator,
+    )
 
 
 def call_openai_json(
@@ -637,7 +700,7 @@ def call_openai_json(
 ) -> dict[str, Any]:
     """Compatibility wrapper for one-shot JSON call."""
 
-    stable = call_llm_json_stable(
+    stable = call_llm_json_retry(
         model=model,
         system_prompt=system_prompt,
         user_payload=user_payload,
@@ -652,13 +715,14 @@ def call_openai_json(
     )
     output = stable.get("output")
     if not isinstance(output, Mapping):
-        raise LMClientError(_error_text("invalid_output", "stable LM result missing output object"))
+        raise LMClientError(_error_text("invalid_output", "LM retry result missing output object"))
     return dict(output)
 
 
 __all__ = [
     "LMClientError",
-    "LMNonDeterminismError",
+    "LMOutputInvalidError",
+    "call_llm_json_retry",
     "call_llm_json_stable",
     "call_openai_json",
 ]

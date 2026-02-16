@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from agent.controller.lm_client import LMClientError, call_llm_json_stable
+from agent.controller.lm_client import LMClientError, call_llm_json_retry
 from agent.controller.specs import (
     SUMMARIZER_OUTPUT_V0_SCHEMA,
     SchemaValidationError,
@@ -87,7 +87,8 @@ class SummarizerLMAgent:
 
     model: str = "gpt-4o-mini"
     temperature: float = 1.0
-    stability_attempts: int = 2
+    max_attempts: int = 5
+    stability_attempts: int | None = None
     seed: int | None = None
     lookback_k: int = 5
     flat_tol: float = 1e-6
@@ -96,35 +97,37 @@ class SummarizerLMAgent:
 
     def summarize(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         summarizer_input = self._normalize_input(payload)
+        max_attempts = self._resolve_max_attempts()
 
         try:
-            stable_result = call_llm_json_stable(
+            retry_result = call_llm_json_retry(
                 model=self.model,
                 system_prompt=self.system_prompt,
                 user_payload=summarizer_input,
                 temperature=self.temperature,
                 output_schema=SUMMARIZER_OUTPUT_V0_SCHEMA,
-                attempts=self.stability_attempts,
+                attempts=max_attempts,
                 seed=self.seed,
             )
-            lm_output_raw = stable_result.get("output")
+            lm_output_raw = retry_result.get("output")
             if not isinstance(lm_output_raw, Mapping):
-                raise SummarizerLMError(_err("invalid_lm_output", "stable output missing object payload"))
+                raise SummarizerLMError(_err("invalid_lm_output", "retry output missing object payload"))
             lm_output = dict(lm_output_raw)
             self._set_trace(
                 {
                     "live_lm_used": True,
                     "status": "ok",
                     "error": None,
-                    "model": stable_result.get("model", self.model),
-                    "temperature": stable_result.get("temperature", self.temperature),
-                    "seed": stable_result.get("seed", self.seed),
-                    "provider": stable_result.get("provider"),
-                    "base_url": stable_result.get("base_url"),
-                    "api_version": stable_result.get("api_version"),
-                    "raw_outputs": list(stable_result.get("raw_outputs", [])),
-                    "canonical_outputs": list(stable_result.get("canonical_outputs", [])),
-                    "stability_check_result": dict(stable_result.get("stability_check_result", {})),
+                    "model": retry_result.get("model", self.model),
+                    "temperature": retry_result.get("temperature", self.temperature),
+                    "seed": retry_result.get("seed", self.seed),
+                    "provider": retry_result.get("provider"),
+                    "base_url": retry_result.get("base_url"),
+                    "api_version": retry_result.get("api_version"),
+                    "raw_outputs": list(retry_result.get("raw_outputs", [])),
+                    "attempt_summaries": list(retry_result.get("attempt_summaries", [])),
+                    "accepted_attempt_index": retry_result.get("accepted_attempt_index"),
+                    "max_attempts": retry_result.get("max_attempts", max_attempts),
                 }
             )
         except LMClientError as exc:
@@ -140,11 +143,9 @@ class SummarizerLMAgent:
                     "base_url": None,
                     "api_version": None,
                     "raw_outputs": list(getattr(exc, "raw_outputs", [])),
-                    "canonical_outputs": list(getattr(exc, "canonical_outputs", [])),
-                    "stability_check_result": {
-                        "attempts": self.stability_attempts,
-                        "passed": False,
-                    },
+                    "attempt_summaries": list(getattr(exc, "attempt_summaries", [])),
+                    "accepted_attempt_index": None,
+                    "max_attempts": max_attempts,
                 }
             )
             raise SummarizerLMError(_err("lm_call_failed", str(exc))) from exc
@@ -257,6 +258,12 @@ class SummarizerLMAgent:
 
     def _set_trace(self, trace: Mapping[str, Any]) -> None:
         object.__setattr__(self, "last_lm_trace", dict(trace))
+
+    def _resolve_max_attempts(self) -> int:
+        raw_attempts = self.max_attempts if self.stability_attempts is None else self.stability_attempts
+        if not isinstance(raw_attempts, int) or raw_attempts < 1:
+            raise SummarizerLMError(_err("invalid_attempts", "max_attempts must be an integer >= 1"))
+        return raw_attempts
 
 
 def _extract_history_records(*, payload: Mapping[str, Any], state: Mapping[str, Any]) -> list[dict[str, Any]]:

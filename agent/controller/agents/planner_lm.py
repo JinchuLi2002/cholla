@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import json
 from typing import Any, Mapping
 
-from agent.controller.lm_client import LMClientError, call_llm_json_stable
+from agent.controller.lm_client import LMClientError, call_llm_json_retry
 from agent.controller.specs import (
     SUMMARY_SPEC_V0_SCHEMA,
     PlanSpecV0,
@@ -97,7 +97,8 @@ class PlannerLMAgent:
 
     model: str = "gpt-4o-mini"
     temperature: float = 1.0
-    stability_attempts: int = 2
+    max_attempts: int = 5
+    stability_attempts: int | None = None
     seed: int | None = None
     objective: str = "maximize_metric_scalar"
     system_prompt: str = DEFAULT_PLANNER_SYSTEM_PROMPT
@@ -105,35 +106,38 @@ class PlannerLMAgent:
 
     def plan(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         planner_input = self._normalize_input(payload)
+        max_attempts = self._resolve_max_attempts()
 
         try:
-            stable_result = call_llm_json_stable(
+            retry_result = call_llm_json_retry(
                 model=self.model,
                 system_prompt=self.system_prompt,
                 user_payload=planner_input,
                 temperature=self.temperature,
                 output_schema=PLANNER_LM_OUTPUT_SCHEMA,
-                attempts=self.stability_attempts,
+                attempts=max_attempts,
                 seed=self.seed,
+                extra_validator=_validate_planner_output_constraints,
             )
-            lm_output_raw = stable_result.get("output")
+            lm_output_raw = retry_result.get("output")
             if not isinstance(lm_output_raw, Mapping):
-                raise PlannerLMError(_err("invalid_lm_output", "stable output missing object payload"))
+                raise PlannerLMError(_err("invalid_lm_output", "retry output missing object payload"))
             lm_output = dict(lm_output_raw)
             self._set_trace(
                 {
                     "live_lm_used": True,
                     "status": "ok",
                     "error": None,
-                    "model": stable_result.get("model", self.model),
-                    "temperature": stable_result.get("temperature", self.temperature),
-                    "seed": stable_result.get("seed", self.seed),
-                    "provider": stable_result.get("provider"),
-                    "base_url": stable_result.get("base_url"),
-                    "api_version": stable_result.get("api_version"),
-                    "raw_outputs": list(stable_result.get("raw_outputs", [])),
-                    "canonical_outputs": list(stable_result.get("canonical_outputs", [])),
-                    "stability_check_result": dict(stable_result.get("stability_check_result", {})),
+                    "model": retry_result.get("model", self.model),
+                    "temperature": retry_result.get("temperature", self.temperature),
+                    "seed": retry_result.get("seed", self.seed),
+                    "provider": retry_result.get("provider"),
+                    "base_url": retry_result.get("base_url"),
+                    "api_version": retry_result.get("api_version"),
+                    "raw_outputs": list(retry_result.get("raw_outputs", [])),
+                    "attempt_summaries": list(retry_result.get("attempt_summaries", [])),
+                    "accepted_attempt_index": retry_result.get("accepted_attempt_index"),
+                    "max_attempts": retry_result.get("max_attempts", max_attempts),
                 }
             )
         except LMClientError as exc:
@@ -149,11 +153,9 @@ class PlannerLMAgent:
                     "base_url": None,
                     "api_version": None,
                     "raw_outputs": list(getattr(exc, "raw_outputs", [])),
-                    "canonical_outputs": list(getattr(exc, "canonical_outputs", [])),
-                    "stability_check_result": {
-                        "attempts": self.stability_attempts,
-                        "passed": False,
-                    },
+                    "attempt_summaries": list(getattr(exc, "attempt_summaries", [])),
+                    "accepted_attempt_index": None,
+                    "max_attempts": max_attempts,
                 }
             )
             raise PlannerLMError(_err("lm_call_failed", str(exc))) from exc
@@ -306,8 +308,30 @@ class PlannerLMAgent:
         required = {"summary_spec", "param_space", "budget_remaining", "iteration_index", "objective"}
         return required.issubset(set(payload.keys()))
 
+    def _resolve_max_attempts(self) -> int:
+        raw_attempts = self.max_attempts if self.stability_attempts is None else self.stability_attempts
+        if not isinstance(raw_attempts, int) or raw_attempts < 1:
+            raise PlannerLMError(_err("invalid_attempts", "max_attempts must be an integer >= 1"))
+        return raw_attempts
+
     def _set_trace(self, trace: Mapping[str, Any]) -> None:
         object.__setattr__(self, "last_lm_trace", dict(trace))
+
+
+def _validate_planner_output_constraints(payload: Mapping[str, Any]) -> None:
+    if not isinstance(payload, Mapping):
+        raise ValueError("planner output must be an object")
+    proposals_raw = payload.get("proposals")
+    proposals = proposals_raw if isinstance(proposals_raw, list) else []
+    if len(proposals) != 1:
+        raise ValueError(f"expected exactly 1 proposal, got {len(proposals)}")
+    proposal_raw = proposals[0]
+    if not isinstance(proposal_raw, Mapping):
+        raise ValueError("proposals[0] must be an object")
+    allowed_keys = {"params", "note"}
+    unknown = sorted(set(proposal_raw.keys()) - allowed_keys)
+    if unknown:
+        raise ValueError(f"proposals[0] has unsupported keys: {unknown}")
 
 
 def _as_non_negative_int(value: Any, *, default: int) -> int:

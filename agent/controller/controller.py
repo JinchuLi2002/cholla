@@ -982,13 +982,6 @@ class HybridController:
             error = trace.get("error")
             raise RuntimeError(f"{agent_kind}_live_lm_required: LM status not ok ({error})")
 
-        stability_raw = trace.get("stability_check_result")
-        stability = dict(stability_raw) if isinstance(stability_raw, Mapping) else {}
-        if stability.get("passed") is not True:
-            raise RuntimeError(
-                f"{agent_kind}_live_lm_required: stability check failed ({stability})"
-            )
-
     def _agent_card(self, agent_kind: str) -> dict[str, Any]:
         if not hasattr(self, "_agent_cards_cache"):
             self._agent_cards_cache: dict[str, dict[str, Any]] = {}
@@ -1038,10 +1031,42 @@ class HybridController:
         ).hexdigest()
 
         lm_trace = self._agent_lm_trace(agent_kind)
-        stability_raw = lm_trace.get("stability_check_result")
-        stability = dict(stability_raw) if isinstance(stability_raw, Mapping) else None
         raw_outputs = lm_trace.get("raw_outputs")
         raw_outputs_list = list(raw_outputs) if isinstance(raw_outputs, list) else []
+        attempts_raw = lm_trace.get("attempt_summaries")
+        attempt_summaries = [dict(entry) for entry in attempts_raw] if isinstance(attempts_raw, list) else []
+        accepted_attempt_index_raw = lm_trace.get("accepted_attempt_index")
+        accepted_attempt_index = (
+            int(accepted_attempt_index_raw)
+            if isinstance(accepted_attempt_index_raw, int) and not isinstance(accepted_attempt_index_raw, bool)
+            else None
+        )
+        max_attempts_raw = lm_trace.get("max_attempts")
+        max_attempts = (
+            int(max_attempts_raw)
+            if isinstance(max_attempts_raw, int) and not isinstance(max_attempts_raw, bool)
+            else None
+        )
+        if max_attempts is None:
+            fallback_attempts_raw = getattr(agent_obj, "max_attempts", None)
+            if not (
+                isinstance(fallback_attempts_raw, int)
+                and not isinstance(fallback_attempts_raw, bool)
+            ):
+                fallback_attempts_raw = getattr(agent_obj, "stability_attempts", None)
+            if not (
+                isinstance(fallback_attempts_raw, int)
+                and not isinstance(fallback_attempts_raw, bool)
+            ):
+                base_obj = getattr(agent_obj, "base", None)
+                fallback_attempts_raw = getattr(base_obj, "max_attempts", None)
+                if not (
+                    isinstance(fallback_attempts_raw, int)
+                    and not isinstance(fallback_attempts_raw, bool)
+                ):
+                    fallback_attempts_raw = getattr(base_obj, "stability_attempts", None)
+            if isinstance(fallback_attempts_raw, int) and not isinstance(fallback_attempts_raw, bool):
+                max_attempts = int(fallback_attempts_raw)
         trace_seed_raw = lm_trace.get("seed")
         trace_seed = (
             int(trace_seed_raw)
@@ -1067,8 +1092,10 @@ class HybridController:
             "live_lm_used": lm_trace.get("live_lm_used"),
             "lm_status": lm_trace.get("status"),
             "lm_error": lm_trace.get("error"),
-            "stability_check_result": stability,
             "raw_outputs": raw_outputs_list,
+            "attempt_summaries": attempt_summaries,
+            "accepted_attempt_index": accepted_attempt_index,
+            "max_attempts": max_attempts,
         }
 
     def _write_agent_task_envelope(
@@ -1099,13 +1126,64 @@ class HybridController:
         audit = self._agent_runtime_audit(agent_kind=agent_kind, input_payload=input_payload)
         task_name = f"task_{iteration}_{agent_kind}"
         lm_raw_output_artifacts: list[str] = []
+        attempts: list[dict[str, Any]] = []
         raw_outputs = audit.get("raw_outputs")
+        raw_output_artifact_map: dict[int, str] = {}
+        raw_dir = tasks_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
         if isinstance(raw_outputs, list):
             for idx, raw_output in enumerate(raw_outputs):
-                raw_path = tasks_dir / f"{task_name}_lm_raw_{idx}.txt"
+                raw_path = raw_dir / f"{task_name}_attempt_{idx}.txt"
                 raw_path.write_text(_text_for_artifact(raw_output), encoding="utf-8")
                 lm_raw_output_artifacts.append(str(raw_path))
+                raw_output_artifact_map[idx] = str(raw_path)
                 output_paths.append(str(raw_path))
+
+        attempt_summaries = audit.get("attempt_summaries")
+        if isinstance(attempt_summaries, list):
+            for idx, summary in enumerate(attempt_summaries):
+                summary_map = dict(summary) if isinstance(summary, Mapping) else {}
+                attempt_index_raw = summary_map.get("attempt_index")
+                attempt_index = (
+                    int(attempt_index_raw)
+                    if isinstance(attempt_index_raw, int) and not isinstance(attempt_index_raw, bool)
+                    else idx
+                )
+                raw_output_index_raw = summary_map.get("raw_output_index")
+                raw_output_index = (
+                    int(raw_output_index_raw)
+                    if isinstance(raw_output_index_raw, int) and not isinstance(raw_output_index_raw, bool)
+                    else None
+                )
+                raw_artifact = (
+                    raw_output_artifact_map.get(raw_output_index) if raw_output_index is not None else None
+                )
+                attempts.append(
+                    {
+                        "attempt_index": attempt_index,
+                        "status": summary_map.get("status"),
+                        "error": summary_map.get("error"),
+                        "raw_output_artifact": raw_artifact,
+                        "json_parse_ok": summary_map.get("json_parse_ok"),
+                        "schema_valid": summary_map.get("schema_valid"),
+                        "constraints_valid": summary_map.get("constraints_valid"),
+                        "accepted": summary_map.get("accepted"),
+                    }
+                )
+        elif lm_raw_output_artifacts:
+            for idx, path in enumerate(lm_raw_output_artifacts):
+                attempts.append(
+                    {
+                        "attempt_index": idx,
+                        "status": "unknown",
+                        "error": None,
+                        "raw_output_artifact": path,
+                        "json_parse_ok": None,
+                        "schema_valid": None,
+                        "constraints_valid": None,
+                        "accepted": None,
+                    }
+                )
 
         envelope = {
             "task_id": f"{self.experiment_id}:{self.controller_run_id}:{task_name}",
@@ -1122,6 +1200,9 @@ class HybridController:
             "model": audit["model"],
             "temperature": audit["temperature"],
             "seed": audit["seed"],
+            "max_attempts": audit["max_attempts"],
+            "accepted_attempt_index": audit["accepted_attempt_index"],
+            "attempts": attempts,
             "prompt_input_hash": audit["prompt_input_hash"],
             "provider": audit["provider"],
             "base_url": audit["base_url"],
@@ -1129,7 +1210,6 @@ class HybridController:
             "live_lm_used": audit["live_lm_used"],
             "lm_status": audit["lm_status"],
             "lm_error": audit["lm_error"],
-            "stability_check_result": audit["stability_check_result"],
             "lm_raw_output_artifacts": lm_raw_output_artifacts,
         }
         task_path = tasks_dir / f"{task_name}.json"
