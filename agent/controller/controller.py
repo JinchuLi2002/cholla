@@ -1042,10 +1042,24 @@ class HybridController:
         stability = dict(stability_raw) if isinstance(stability_raw, Mapping) else None
         raw_outputs = lm_trace.get("raw_outputs")
         raw_outputs_list = list(raw_outputs) if isinstance(raw_outputs, list) else []
+        trace_seed_raw = lm_trace.get("seed")
+        trace_seed = (
+            int(trace_seed_raw)
+            if isinstance(trace_seed_raw, int) and not isinstance(trace_seed_raw, bool)
+            else None
+        )
+        if trace_seed is None:
+            seed_raw = getattr(agent_obj, "seed", None)
+            if not (isinstance(seed_raw, int) and not isinstance(seed_raw, bool)):
+                base_obj = getattr(agent_obj, "base", None)
+                seed_raw = getattr(base_obj, "seed", None)
+            if isinstance(seed_raw, int) and not isinstance(seed_raw, bool):
+                trace_seed = int(seed_raw)
 
         return {
             "model": model,
             "temperature": temperature,
+            "seed": trace_seed,
             "prompt_input_hash": prompt_input_hash,
             "provider": lm_trace.get("provider"),
             "base_url": lm_trace.get("base_url"),
@@ -1107,6 +1121,7 @@ class HybridController:
             "output_artifacts": output_paths,
             "model": audit["model"],
             "temperature": audit["temperature"],
+            "seed": audit["seed"],
             "prompt_input_hash": audit["prompt_input_hash"],
             "provider": audit["provider"],
             "base_url": audit["base_url"],

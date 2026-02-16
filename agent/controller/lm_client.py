@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any, Mapping
@@ -13,6 +14,7 @@ from agent.controller.specs import SchemaValidationError, validate_json_schema
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+DEFAULT_LM_SEED_MODULUS = 2_147_483_647
 PROVIDER_OPENAI = "openai"
 PROVIDER_AZURE = "azure"
 JSON_ONLY_INSTRUCTION = (
@@ -264,6 +266,68 @@ def _messages(
     ]
 
 
+def _normalize_seed(raw_seed: Any) -> int:
+    if not isinstance(raw_seed, int) or isinstance(raw_seed, bool):
+        raise LMClientError(_error_text("invalid_seed", "seed must be an integer"))
+    if raw_seed < 0:
+        raise LMClientError(_error_text("invalid_seed", "seed must be >= 0"))
+    if raw_seed > DEFAULT_LM_SEED_MODULUS:
+        raise LMClientError(
+            _error_text(
+                "invalid_seed",
+                f"seed must be <= {DEFAULT_LM_SEED_MODULUS}",
+            )
+        )
+    return raw_seed
+
+
+def _deterministic_seed(
+    *,
+    model: str,
+    temperature: float,
+    messages: list[dict[str, str]],
+) -> int:
+    seed_payload = {
+        "model": model,
+        "temperature": temperature,
+        "messages": messages,
+    }
+    digest = hashlib.sha256(
+        json.dumps(seed_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).digest()
+    # Use first 4 bytes to stay in 32-bit integer range expected by APIs.
+    return int.from_bytes(digest[:4], "big") % (DEFAULT_LM_SEED_MODULUS + 1)
+
+
+def _resolve_seed(
+    *,
+    seed_override: int | None,
+    model: str,
+    temperature: float,
+    messages: list[dict[str, str]],
+) -> int:
+    if seed_override is not None:
+        return _normalize_seed(seed_override)
+
+    seed_from_env = (
+        os.environ.get("ASTROMLAB_LM_SEED", "").strip()
+        or os.environ.get("OPENAI_SEED", "").strip()
+    )
+    if seed_from_env:
+        try:
+            return _normalize_seed(int(seed_from_env))
+        except ValueError as exc:
+            raise LMClientError(
+                _error_text("invalid_seed", f"environment seed is not an integer: {seed_from_env!r}")
+            ) from exc
+
+    return _deterministic_seed(
+        model=model,
+        temperature=temperature,
+        messages=messages,
+    )
+
+
 def _validate_output_schema(payload: Mapping[str, Any], output_schema: Mapping[str, Any] | None) -> None:
     if output_schema is None:
         return
@@ -282,6 +346,7 @@ def _sdk_call(
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
+    seed: int | None,
 ) -> str:
     if provider == PROVIDER_AZURE:
         try:
@@ -301,11 +366,17 @@ def _sdk_call(
         client = OpenAI(base_url=base_url, api_key=api_key)
 
     try:
+        request_kwargs: dict[str, Any] = {
+            "model": model,
+            "temperature": temperature,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+        }
+        if seed is not None:
+            request_kwargs["seed"] = seed
+
         response = client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            messages=messages,
-            response_format={"type": "json_object"},
+            **request_kwargs,
         )
     except Exception as exc:  # noqa: BLE001
         raise LMClientError(_error_text("request_failed", str(exc))) from exc
@@ -331,6 +402,7 @@ def _http_call(
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
+    seed: int | None,
 ) -> str:
     body = {
         "model": model,
@@ -338,6 +410,8 @@ def _http_call(
         "messages": messages,
         "response_format": {"type": "json_object"},
     }
+    if seed is not None:
+        body["seed"] = seed
     data = json.dumps(body).encode("utf-8")
 
     headers = {"Content-Type": "application/json"}
@@ -406,6 +480,7 @@ def _request_raw_response_text(
     model: str,
     temperature: float,
     messages: list[dict[str, str]],
+    seed: int | None,
 ) -> str:
     try:
         return _sdk_call(
@@ -416,6 +491,7 @@ def _request_raw_response_text(
             model=model,
             temperature=temperature,
             messages=messages,
+            seed=seed,
         )
     except LMClientError as sdk_exc:
         # Fall back to direct HTTP only when SDK is unavailable.
@@ -428,6 +504,7 @@ def _request_raw_response_text(
             model=model,
             temperature=temperature,
             messages=messages,
+            seed=seed,
         )
 
 
@@ -443,6 +520,7 @@ def call_llm_json_stable(
     provider: str | None = None,
     api_version: str | None = None,
     attempts: int = 2,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Call LM multiple times and require canonical JSON equivalence."""
 
@@ -478,6 +556,12 @@ def call_llm_json_stable(
         user_payload=user_payload,
         output_schema=output_schema,
     )
+    resolved_seed = _resolve_seed(
+        seed_override=seed,
+        model=model.strip(),
+        temperature=temp,
+        messages=messages,
+    )
 
     raw_outputs: list[str] = []
     parsed_outputs: list[dict[str, Any]] = []
@@ -493,6 +577,7 @@ def call_llm_json_stable(
             model=model.strip(),
             temperature=temp,
             messages=messages,
+            seed=resolved_seed,
         )
         raw_outputs.append(raw_text)
         parsed = _strict_json_object(raw_text)
@@ -528,6 +613,7 @@ def call_llm_json_stable(
         "api_version": resolved_api_version or None,
         "model": model.strip(),
         "temperature": temp,
+        "seed": resolved_seed,
         "stability_check_result": {
             "attempts": attempts,
             "passed": True,
@@ -547,6 +633,7 @@ def call_openai_json(
     api_key: str | None = None,
     provider: str | None = None,
     api_version: str | None = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for one-shot JSON call."""
 
@@ -561,6 +648,7 @@ def call_openai_json(
         provider=provider,
         api_version=api_version,
         attempts=1,
+        seed=seed,
     )
     output = stable.get("output")
     if not isinstance(output, Mapping):

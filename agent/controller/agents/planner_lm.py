@@ -98,6 +98,7 @@ class PlannerLMAgent:
     model: str = "gpt-4o-mini"
     temperature: float = 1.0
     stability_attempts: int = 2
+    seed: int | None = None
     objective: str = "maximize_metric_scalar"
     system_prompt: str = DEFAULT_PLANNER_SYSTEM_PROMPT
     last_lm_trace: dict[str, Any] = field(default_factory=dict, init=False, repr=False, compare=False)
@@ -113,6 +114,7 @@ class PlannerLMAgent:
                 temperature=self.temperature,
                 output_schema=PLANNER_LM_OUTPUT_SCHEMA,
                 attempts=self.stability_attempts,
+                seed=self.seed,
             )
             lm_output_raw = stable_result.get("output")
             if not isinstance(lm_output_raw, Mapping):
@@ -125,6 +127,7 @@ class PlannerLMAgent:
                     "error": None,
                     "model": stable_result.get("model", self.model),
                     "temperature": stable_result.get("temperature", self.temperature),
+                    "seed": stable_result.get("seed", self.seed),
                     "provider": stable_result.get("provider"),
                     "base_url": stable_result.get("base_url"),
                     "api_version": stable_result.get("api_version"),
@@ -141,6 +144,7 @@ class PlannerLMAgent:
                     "error": str(exc),
                     "model": self.model,
                     "temperature": float(self.temperature),
+                    "seed": self.seed,
                     "provider": None,
                     "base_url": None,
                     "api_version": None,

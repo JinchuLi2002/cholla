@@ -88,6 +88,7 @@ class SummarizerLMAgent:
     model: str = "gpt-4o-mini"
     temperature: float = 1.0
     stability_attempts: int = 2
+    seed: int | None = None
     lookback_k: int = 5
     flat_tol: float = 1e-6
     system_prompt: str = DEFAULT_SUMMARIZER_SYSTEM_PROMPT
@@ -104,6 +105,7 @@ class SummarizerLMAgent:
                 temperature=self.temperature,
                 output_schema=SUMMARIZER_OUTPUT_V0_SCHEMA,
                 attempts=self.stability_attempts,
+                seed=self.seed,
             )
             lm_output_raw = stable_result.get("output")
             if not isinstance(lm_output_raw, Mapping):
@@ -116,6 +118,7 @@ class SummarizerLMAgent:
                     "error": None,
                     "model": stable_result.get("model", self.model),
                     "temperature": stable_result.get("temperature", self.temperature),
+                    "seed": stable_result.get("seed", self.seed),
                     "provider": stable_result.get("provider"),
                     "base_url": stable_result.get("base_url"),
                     "api_version": stable_result.get("api_version"),
@@ -132,6 +135,7 @@ class SummarizerLMAgent:
                     "error": str(exc),
                     "model": self.model,
                     "temperature": float(self.temperature),
+                    "seed": self.seed,
                     "provider": None,
                     "base_url": None,
                     "api_version": None,
