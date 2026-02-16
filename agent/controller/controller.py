@@ -7,6 +7,8 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
+import tempfile
 import time
 from typing import Any, Mapping
 
@@ -909,6 +911,7 @@ class HybridController:
         schedule_text: str,
         replay_iter_dir: Path,
         artifacts_dir: Path,
+        backend_out_root: Path | None = None,
     ) -> list[dict[str, Any]]:
         replay_iter_dir.mkdir(parents=True, exist_ok=True)
         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -938,10 +941,12 @@ class HybridController:
         rendered_schedule_path.write_text(schedule_text, encoding="utf-8")
 
         expected_run_id = f"{controller_run_id}_iter_{iteration:04d}"
+        run_out_root = backend_out_root if backend_out_root is not None else (replay_iter_dir / "backend_runs")
+        run_out_root.mkdir(parents=True, exist_ok=True)
         run_payload = {
             "params_text": params_text,
             "schedule_text": schedule_text,
-            "out_root": str((replay_iter_dir / "backend_runs").resolve()),
+            "out_root": str(run_out_root.resolve()),
             "run_id": expected_run_id,
         }
         run_call = self._replay_invoke_tool_call(
@@ -1438,6 +1443,11 @@ class HybridController:
         }
         replay_artifacts_root = bundle_dir / "replay" / replay_mode_norm
         replay_artifacts_root.mkdir(parents=True, exist_ok=True)
+        replay_backend_hash = hashlib.sha1(
+            f"{experiment_id}:{controller_run_id}:{replay_mode_norm}".encode("utf-8")
+        ).hexdigest()[:10]
+        replay_backend_root = Path(tempfile.gettempdir()) / "cholla_replay" / replay_backend_hash
+        replay_backend_root.mkdir(parents=True, exist_ok=True)
 
         params_checked = 0
         run_ids_checked = 0
@@ -1546,6 +1556,8 @@ class HybridController:
 
                 if should_replay_tools:
                     replay_iter_dir = replay_artifacts_root / f"iter_{iteration}"
+                    replay_backend_out_root = replay_backend_root / f"iter_{iteration}" / "backend_runs"
+                    shutil.rmtree(replay_backend_out_root, ignore_errors=True)
                     replay_tool_results = self._replay_execute_iteration_tool_chain(
                         iteration=iteration,
                         controller_run_id=controller_run_id,
@@ -1554,6 +1566,7 @@ class HybridController:
                         schedule_text=schedule_text,
                         replay_iter_dir=replay_iter_dir,
                         artifacts_dir=replay_iter_dir / "artifacts",
+                        backend_out_root=replay_backend_out_root,
                     )
 
                     replay_validate_call = self._tool_call_by_name(replay_tool_results, "validate_params")
