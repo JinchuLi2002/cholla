@@ -3,6 +3,8 @@
 __all__ = [
     "controller",
     "plan_executor",
+    "plans",
+    "planspec",
     "tool_registry",
     "artifact_store",
     "replay",
