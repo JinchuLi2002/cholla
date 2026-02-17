@@ -218,9 +218,15 @@ class HybridController:
         self.param_space_path = self._resolve_path(Path(param_space_path))
         self.run_root = self._resolve_path(Path(run_root))
         self.history_writer = HistoryWriter(self._resolve_path(Path(history_path)))
-        self.tool_registry: dict[str, Mapping[str, Any]] = (
-            dict(tool_registry) if tool_registry is not None else dict(DEFAULT_TOOLS)
-        )
+        registry_obj: Any
+        if tool_registry is None:
+            registry_obj = dict(DEFAULT_TOOLS)
+        elif callable(getattr(tool_registry, "invoke", None)):
+            # Preserve class-based registries that expose invoke(name, args, context).
+            registry_obj = tool_registry
+        else:
+            registry_obj = dict(tool_registry)
+        self.tool_registry = registry_obj
         self.controller_run_id = controller_run_id.strip() or _derive_controller_run_id()
         self.experiment_id = experiment_id.strip() or f"ctrl_{self.controller_run_id}"
         self.max_iterations = int(max_iterations)

@@ -7,7 +7,7 @@ import importlib
 from pathlib import Path
 import re
 import sys
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping, Protocol
 
 from kernel.planspec import (
     PLAN_SPEC_SCHEMA_VERSION,
@@ -20,7 +20,16 @@ from kernel.planspec import (
 )
 
 
-ToolRegistry = Mapping[str, Mapping[str, Any]]
+class ToolRegistry(Protocol):
+    """Plan executor contract for deterministic tool invocation."""
+
+    def invoke(
+        self,
+        name: str,
+        args: Mapping[str, Any],
+        context: Mapping[str, Any] | None,
+    ) -> Any:
+        """Invoke tool by name with validated args/context."""
 
 
 def _load_execute_run_module():
@@ -29,24 +38,6 @@ def _load_execute_run_module():
     if agent_dir_str not in sys.path:
         sys.path.insert(0, agent_dir_str)
     return importlib.import_module("agent.execute_run")
-
-
-def _resolve_tool_callable(callable_ref: Any) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    if callable(callable_ref):
-        return callable_ref
-
-    if not isinstance(callable_ref, str) or ":" not in callable_ref:
-        raise TypeError(f"invalid tool callable reference: {callable_ref!r}")
-
-    module_name, attr_name = callable_ref.split(":", 1)
-    if not module_name or not attr_name:
-        raise TypeError(f"invalid tool callable reference: {callable_ref!r}")
-
-    module = importlib.import_module(module_name)
-    fn = getattr(module, attr_name, None)
-    if not callable(fn):
-        raise TypeError(f"resolved tool callable is not callable: {callable_ref!r}")
-    return fn
 
 
 def _tool_call_status(*, tool_name: str, result: Mapping[str, Any]) -> str:
@@ -67,13 +58,18 @@ def _tool_call_status(*, tool_name: str, result: Mapping[str, Any]) -> str:
     return "success"
 
 
-def _invoke_tool(*, tool_name: str, payload: dict[str, Any], tool_registry: ToolRegistry) -> dict[str, Any]:
-    descriptor = tool_registry.get(tool_name)
-    if descriptor is None:
-        raise KeyError(f"unknown tool: {tool_name}")
+def _invoke_tool(
+    *,
+    tool_name: str,
+    payload: dict[str, Any],
+    context: Mapping[str, Any],
+    tool_registry: ToolRegistry,
+) -> dict[str, Any]:
+    invoke = getattr(tool_registry, "invoke", None)
+    if not callable(invoke):
+        raise TypeError("tool_registry must expose invoke(name, args, context)")
 
-    tool_fn = _resolve_tool_callable(descriptor.get("callable"))
-    result = tool_fn(payload)
+    result = invoke(tool_name, payload, context)
     if not isinstance(result, dict):
         raise TypeError(f"tool {tool_name!r} returned non-object payload: {type(result).__name__}")
     return result
@@ -226,8 +222,7 @@ def execute_plan(
 ) -> dict[str, Any]:
     """Execute one PlanSpec deterministically and return step-aligned tool results.
 
-    Tool invocation path mirrors the controller:
-    descriptor -> callable resolution -> tool_fn(payload).
+    Tool invocation path uses registry.invoke(name, args, context) only.
     """
 
     normalized_plan = _coerce_plan(plan)
@@ -237,9 +232,19 @@ def execute_plan(
     for idx, step in enumerate(normalized_plan.steps):
         step_id = compute_step_id(plan_id, idx, step)
         tool_input = deepcopy(step.payload)
+        tool_context: dict[str, Any] = {
+            "plan_id": plan_id,
+            "step_id": step_id,
+            "step_index": idx,
+        }
 
         try:
-            result = _invoke_tool(tool_name=step.tool, payload=tool_input, tool_registry=tool_registry)
+            result = _invoke_tool(
+                tool_name=step.tool,
+                payload=tool_input,
+                context=tool_context,
+                tool_registry=tool_registry,
+            )
         except Exception as exc:  # noqa: BLE001
             result = {"status": "error", "error": str(exc)}
 
