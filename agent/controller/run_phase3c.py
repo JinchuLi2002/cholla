@@ -15,8 +15,8 @@ from typing import Any, Mapping
 
 import yaml
 
-from agent.controller.controller import HybridController
-from agent.tools.registry import tool_registry_for_backend
+from kernel.controller import HybridController
+from kernel.tool_registry import tool_registry_for_backend
 
 
 CONTROLLER_VERSION = "phase3d_v1"
