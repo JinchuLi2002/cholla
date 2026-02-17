@@ -4,12 +4,16 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/m2_verify.sh --baseline <git_sha_or_ref> --candidate <git_sha_or_ref> [options]
+  scripts/m2_verify.sh --mode <same_sha|cross_sha> --baseline <git_sha_or_ref> --candidate <git_sha_or_ref> [options]
 
 Options:
+  --mode <same_sha|cross_sha>
+                         Required harness mode:
+                           same_sha  => baseline/candidate must resolve to the same commit and ignores must be empty
+                           cross_sha => baseline/candidate must resolve to different commits; only commit-id ignores allowed
   --config <path>         Config path relative to repo root (default: configs/phase3c_ci_smoke.yaml)
   --max-diffs <n>         Max diff lines from diff_bundle.py (default: 20)
-  --ignore <rule>         Extra diff_bundle ignore rule (repeatable)
+  --ignore <rule>         Extra JSON pointer ignore rule (repeatable); restricted by --mode policy
   --induce-mismatch       After parity PASS, mutate candidate bundle copy and verify FAIL path
   --keep-tmp              Keep temporary worktree directory for inspection
   -h, --help              Show this help
@@ -24,19 +28,24 @@ EOF
 
 BASELINE_SHA=""
 CANDIDATE_SHA=""
+MODE=""
 CONFIG_REL="configs/phase3c_ci_smoke.yaml"
 MAX_DIFFS="20"
 INDUCE_MISMATCH="0"
 KEEP_TMP="0"
-DIFF_IGNORES=(
-  "file:config_effective.yaml"
-  "file:controller/config_effective.yaml"
+COMMIT_ID_JSON_PTRS=(
   "/HEAD_SHA"
   "/head_sha"
 )
+EXTRA_IGNORES=()
+IGNORE_JSON_PTRS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --mode)
+      MODE="${2:-}"
+      shift 2
+      ;;
     --baseline)
       BASELINE_SHA="${2:-}"
       shift 2
@@ -54,7 +63,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --ignore)
-      DIFF_IGNORES+=("${2:-}")
+      EXTRA_IGNORES+=("${2:-}")
       shift 2
       ;;
     --induce-mismatch)
@@ -83,6 +92,17 @@ if [[ -z "$BASELINE_SHA" || -z "$CANDIDATE_SHA" ]]; then
   exit 2
 fi
 
+if [[ -z "$MODE" ]]; then
+  echo "ERROR: --mode is required (same_sha|cross_sha)" >&2
+  usage
+  exit 2
+fi
+
+if [[ "$MODE" != "same_sha" && "$MODE" != "cross_sha" ]]; then
+  echo "ERROR: --mode must be one of: same_sha, cross_sha" >&2
+  exit 2
+fi
+
 if ! [[ "$MAX_DIFFS" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --max-diffs must be a non-negative integer" >&2
   exit 2
@@ -90,6 +110,88 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+
+BASELINE_RESOLVED_SHA="$(git -C "$REPO_ROOT" rev-parse "${BASELINE_SHA}^{commit}")"
+CANDIDATE_RESOLVED_SHA="$(git -C "$REPO_ROOT" rev-parse "${CANDIDATE_SHA}^{commit}")"
+
+_is_commit_identity_ptr() {
+  local ptr="$1"
+  case "$ptr" in
+    "/HEAD_SHA"|"/head_sha")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if [[ "${#EXTRA_IGNORES[@]}" -gt 0 ]]; then
+  for rule in "${EXTRA_IGNORES[@]}"; do
+    if [[ "$rule" == file:* ]]; then
+      echo "ERROR: file-level ignores are not allowed: $rule" >&2
+      exit 2
+    fi
+  done
+fi
+
+if [[ "$MODE" == "same_sha" ]]; then
+  if [[ "$BASELINE_RESOLVED_SHA" != "$CANDIDATE_RESOLVED_SHA" ]]; then
+    echo "ERROR: same_sha mode requires baseline and candidate to resolve to the same commit" >&2
+    echo "  baseline=$BASELINE_RESOLVED_SHA" >&2
+    echo "  candidate=$CANDIDATE_RESOLVED_SHA" >&2
+    exit 2
+  fi
+  if [[ "${#EXTRA_IGNORES[@]}" -ne 0 ]]; then
+    echo "ERROR: same_sha mode forbids --ignore; ignore list must be empty" >&2
+    exit 2
+  fi
+  IGNORE_JSON_PTRS=()
+fi
+
+if [[ "$MODE" == "cross_sha" ]]; then
+  if [[ "$BASELINE_RESOLVED_SHA" == "$CANDIDATE_RESOLVED_SHA" ]]; then
+    echo "ERROR: cross_sha mode requires baseline and candidate to resolve to different commits" >&2
+    echo "  baseline=$BASELINE_RESOLVED_SHA" >&2
+    echo "  candidate=$CANDIDATE_RESOLVED_SHA" >&2
+    exit 2
+  fi
+  IGNORE_JSON_PTRS=("${COMMIT_ID_JSON_PTRS[@]}")
+  if [[ "${#EXTRA_IGNORES[@]}" -gt 0 ]]; then
+    for rule in "${EXTRA_IGNORES[@]}"; do
+      if ! _is_commit_identity_ptr "$rule"; then
+        echo "ERROR: cross_sha mode allows commit-identity ignores only (/HEAD_SHA, /head_sha); got $rule" >&2
+        exit 2
+      fi
+      already_present="0"
+      for existing in "${IGNORE_JSON_PTRS[@]}"; do
+        if [[ "$existing" == "$rule" ]]; then
+          already_present="1"
+          break
+        fi
+      done
+      if [[ "$already_present" == "0" ]]; then
+        IGNORE_JSON_PTRS+=("$rule")
+      fi
+    done
+  fi
+fi
+
+if [[ "$MODE" == "same_sha" && "${#IGNORE_JSON_PTRS[@]}" -ne 0 ]]; then
+  echo "ERROR: same_sha mode must run with empty ignore list" >&2
+  exit 2
+fi
+
+if [[ "$MODE" == "cross_sha" ]]; then
+  if [[ "${#IGNORE_JSON_PTRS[@]}" -gt 0 ]]; then
+    for rule in "${IGNORE_JSON_PTRS[@]}"; do
+      if ! _is_commit_identity_ptr "$rule"; then
+        echo "ERROR: cross_sha mode encountered non commit-id ignore rule: $rule" >&2
+        exit 2
+      fi
+    done
+  fi
+fi
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/cholla_m2_verify.XXXXXX")"
 BASELINE_WT="$TMP_ROOT/baseline_wt"
@@ -172,8 +274,11 @@ PY
 
 echo "[M2-VERIFY] baseline ref:  $BASELINE_SHA"
 echo "[M2-VERIFY] candidate ref: $CANDIDATE_SHA"
+echo "[M2-VERIFY] mode:          $MODE"
+echo "[M2-VERIFY] baseline sha:  $BASELINE_RESOLVED_SHA"
+echo "[M2-VERIFY] candidate sha: $CANDIDATE_RESOLVED_SHA"
 echo "[M2-VERIFY] config:        $CONFIG_REL"
-echo "[M2-VERIFY] ignores:       ${DIFF_IGNORES[*]}"
+echo "[M2-VERIFY] ignores:       ${IGNORE_JSON_PTRS[*]:-<empty>}"
 echo "[M2-VERIFY] temp dir:      $TMP_ROOT"
 
 echo "[M2-VERIFY] creating baseline worktree"
@@ -205,9 +310,11 @@ echo "[M2-VERIFY] candidate bundle: $BUNDLE_CANDIDATE"
 echo "[M2-VERIFY] running diff_bundle parity"
 
 diff_cmd=(python "$REPO_ROOT/scripts/diff_bundle.py" --a "$BUNDLE_BASELINE" --b "$BUNDLE_CANDIDATE" --max-diffs "$MAX_DIFFS")
-for rule in "${DIFF_IGNORES[@]}"; do
-  diff_cmd+=(--ignore "$rule")
-done
+if [[ "${#IGNORE_JSON_PTRS[@]}" -gt 0 ]]; then
+  for rule in "${IGNORE_JSON_PTRS[@]}"; do
+    diff_cmd+=(--ignore "$rule")
+  done
+fi
 
 if "${diff_cmd[@]}" >"$DIFF_LOG" 2>&1; then
   echo "PASS: baseline/candidate bundle parity verified"
@@ -245,9 +352,11 @@ PY
 
   mismatch_diff_log="$TMP_ROOT/diff_induced.log"
   mismatch_diff_cmd=(python "$REPO_ROOT/scripts/diff_bundle.py" --a "$BUNDLE_BASELINE" --b "$MISMATCH_BUNDLE" --max-diffs "$MAX_DIFFS")
-  for rule in "${DIFF_IGNORES[@]}"; do
-    mismatch_diff_cmd+=(--ignore "$rule")
-  done
+  if [[ "${#IGNORE_JSON_PTRS[@]}" -gt 0 ]]; then
+    for rule in "${IGNORE_JSON_PTRS[@]}"; do
+      mismatch_diff_cmd+=(--ignore "$rule")
+    done
+  fi
 
   if "${mismatch_diff_cmd[@]}" >"$mismatch_diff_log" 2>&1; then
     echo "FAIL: induced mismatch did not trigger diff failure"

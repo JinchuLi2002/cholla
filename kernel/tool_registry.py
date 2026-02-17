@@ -22,6 +22,14 @@ from agent.tools.schema import (
     VALIDATE_PARAMS_INPUT_SCHEMA,
     VALIDATE_PARAMS_OUTPUT_SCHEMA,
 )
+from kernel.stub_tools.schema import (
+    STUB_GENERATE_INPUT_SCHEMA,
+    STUB_GENERATE_OUTPUT_SCHEMA,
+    STUB_METRIC_INPUT_SCHEMA,
+    STUB_METRIC_OUTPUT_SCHEMA,
+    STUB_VALIDATE_INPUT_SCHEMA,
+    STUB_VALIDATE_OUTPUT_SCHEMA,
+)
 
 
 ToolCallableNoContext: TypeAlias = Callable[[dict[str, Any]], Any]
@@ -452,6 +460,33 @@ _TOOL_REGISTRATIONS: tuple[_ToolRegistration, ...] = (
     ),
 )
 
+_STUB_TOOL_REGISTRATIONS: tuple[_ToolRegistration, ...] = (
+    _ToolRegistration(
+        name="stub_validate",
+        real_callable="kernel.stub_tools.validate:stub_validate",
+        mock_callable="kernel.stub_tools.validate:stub_validate",
+        input_schema=STUB_VALIDATE_INPUT_SCHEMA,
+        output_schema=STUB_VALIDATE_OUTPUT_SCHEMA,
+        version="v1",
+    ),
+    _ToolRegistration(
+        name="stub_generate",
+        real_callable="kernel.stub_tools.generate:stub_generate",
+        mock_callable="kernel.stub_tools.generate:stub_generate",
+        input_schema=STUB_GENERATE_INPUT_SCHEMA,
+        output_schema=STUB_GENERATE_OUTPUT_SCHEMA,
+        version="v1",
+    ),
+    _ToolRegistration(
+        name="stub_metric",
+        real_callable="kernel.stub_tools.metric:stub_metric",
+        mock_callable="kernel.stub_tools.metric:stub_metric",
+        input_schema=STUB_METRIC_INPUT_SCHEMA,
+        output_schema=STUB_METRIC_OUTPUT_SCHEMA,
+        version="v1",
+    ),
+)
+
 
 def _build_compat_tools() -> dict[str, dict[str, Any]]:
     compat = deepcopy(_LEGACY_TOOLS)
@@ -494,10 +529,38 @@ def tool_registry_for_backend(tool_backend: str) -> ToolRegistry:
     return registry
 
 
+def tool_registry_for_stub() -> ToolRegistry:
+    """Return deterministic registry for the stub domain toolpack."""
+
+    registry = ToolRegistry()
+    for spec in _STUB_TOOL_REGISTRATIONS:
+        registry.register(
+            name=spec.name,
+            callable=spec.real_callable,
+            input_schema=spec.input_schema,
+            output_schema=spec.output_schema,
+            version=spec.version,
+        )
+    return registry
+
+
+def tool_registry_for_domain(*, domain: str, tool_backend: str = "real") -> ToolRegistry:
+    """Return registry by domain, preserving existing cholla backend behavior."""
+
+    domain_norm = domain.strip().lower()
+    if domain_norm == "stub":
+        return tool_registry_for_stub()
+    if domain_norm == "cholla":
+        return tool_registry_for_backend(tool_backend)
+    raise ValueError(f"unknown domain: {domain!r} (expected 'cholla' or 'stub')")
+
+
 __all__ = [
     "TOOLS",
     "ToolRegistry",
     "ToolRegistryError",
     "ToolSpec",
+    "tool_registry_for_domain",
     "tool_registry_for_backend",
+    "tool_registry_for_stub",
 ]

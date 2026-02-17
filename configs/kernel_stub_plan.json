@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "domain": "stub",
+    "runner": "kernel.runner"
+  },
+  "rationale": "single-step deterministic stub smoke",
+  "schema_version": "v1",
+  "should_stop": true,
+  "steps": [
+    {
+      "expects_metric_scalar": false,
+      "expects_run_id": false,
+      "expected_artifacts": [],
+      "metadata": {
+        "case": "kernel_stub_smoke"
+      },
+      "note": "validate canonical smoke params",
+      "payload": {
+        "params": {
+          "H0": 67.66,
+          "Init_redshift": 0.0,
+          "Omega_L": 0.6889,
+          "Omega_M": 0.3111,
+          "gamma": 1.66666667,
+          "nx": 12,
+          "ny": 12,
+          "nz": 12
+        }
+      },
+      "schema_version": "v1",
+      "tool": "validate_params"
+    }
+  ],
+  "termination_reason": "stub_smoke_complete"
+}

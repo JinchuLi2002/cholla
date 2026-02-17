@@ -1,0 +1,12 @@
+domain: stub
+experiment_id: kernel_stub_smoke
+controller_run_id: kernel_stub_smoke_run
+
+toolpack:
+  backend: mock
+
+param_space:
+  domain: stub
+  objective: smoke_validate_params
+  tools:
+    - validate_params

@@ -20,6 +20,8 @@ import re
 import sys
 from typing import Any
 
+import yaml
+
 
 VOLATILE_KEYS = {
     "timestamp",
@@ -156,6 +158,10 @@ def _is_yaml_file(rel_path: str) -> bool:
 
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_yaml(path: Path) -> Any:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _load_jsonl(path: Path) -> list[Any]:
@@ -601,15 +607,29 @@ def main() -> int:
         b_path = bundle_b / rel
 
         if _is_yaml_file(rel):
-            a_bytes = a_path.read_bytes()
-            b_bytes = b_path.read_bytes()
-            if a_bytes != b_bytes:
+            try:
+                a_obj = _load_yaml(a_path)
+                b_obj = _load_yaml(b_path)
+            except Exception as exc:  # noqa: BLE001
                 _append_diff(
                     diffs,
                     max_diffs=args.max_diffs,
                     rel_path=rel,
                     pointer="/",
-                    message="byte mismatch",
+                    message=f"YAML parse error: {exc}",
+                )
+                continue
+
+            a_prepared = _prepare_json_payload(a_obj, json_pointer_patterns)
+            b_prepared = _prepare_json_payload(b_obj, json_pointer_patterns)
+            if _canonical_json(a_prepared) != _canonical_json(b_prepared):
+                _diff_values(
+                    a_prepared,
+                    b_prepared,
+                    rel_path=rel,
+                    pointer="",
+                    diffs=diffs,
+                    max_diffs=args.max_diffs,
                 )
             continue
 

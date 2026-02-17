@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "domain": "stub",
+    "purpose": "deterministic_strict_replay_parity"
+  },
+  "rationale": "deterministic stub chain validate -> generate -> metric",
+  "schema_version": "v1",
+  "should_stop": false,
+  "steps": [
+    {
+      "expects_metric_scalar": false,
+      "expects_run_id": false,
+      "expected_artifacts": [],
+      "metadata": {
+        "order": 0
+      },
+      "note": "validate deterministic payload",
+      "payload": {
+        "count": 8,
+        "offset": 0.125,
+        "scale": 1.5,
+        "seed": 17
+      },
+      "schema_version": "v1",
+      "tool": "stub_validate"
+    },
+    {
+      "expects_metric_scalar": false,
+      "expects_run_id": true,
+      "expected_artifacts": [],
+      "metadata": {
+        "order": 1
+      },
+      "note": "generate deterministic series and run_id",
+      "payload": {
+        "count": 8,
+        "offset": 0.125,
+        "seed": 17
+      },
+      "schema_version": "v1",
+      "tool": "stub_generate"
+    },
+    {
+      "expects_metric_scalar": true,
+      "expects_run_id": false,
+      "expected_artifacts": [],
+      "metadata": {
+        "order": 2
+      },
+      "note": "compute deterministic scalar",
+      "payload": {
+        "count": 8,
+        "offset": 0.125,
+        "scale": 1.5,
+        "seed": 17
+      },
+      "schema_version": "v1",
+      "tool": "stub_metric"
+    }
+  ],
+  "termination_reason": "stub_plan_complete"
+}

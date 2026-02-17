@@ -1,0 +1,20 @@
+domain: stub
+experiment_id: stub_domain_smoke
+controller_run_id: stub_domain_smoke_run
+seed: 17
+
+toolpack:
+  name: stub
+  backend: deterministic
+
+budgets:
+  max_tool_calls: 6
+
+param_space:
+  domain: stub
+  objective: deterministic_stub_scalar
+  metric_name: stub_scalar_v1
+  tools:
+    - stub_validate
+    - stub_generate
+    - stub_metric
