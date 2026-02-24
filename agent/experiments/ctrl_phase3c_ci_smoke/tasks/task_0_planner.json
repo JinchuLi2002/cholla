@@ -1,0 +1,41 @@
+{
+  "accepted_attempt_index": null,
+  "agent_card": {
+    "capabilities": [
+      "plan.next_params",
+      "plan.stop_decision",
+      "tool_call_advisory"
+    ],
+    "input_schema": "agent.controller.specs:PLANNER_INPUT_V0_SCHEMA",
+    "name": "tier4.phase3c.planner",
+    "output_schema": "agent.controller.specs:PLANNER_OUTPUT_V0_SCHEMA",
+    "version": "0.1.0"
+  },
+  "agent_kind": "planner",
+  "api_version": null,
+  "attempts": [],
+  "base_url": null,
+  "controller_run_id": "ctrl_phase3c_ci_smoke_run",
+  "error": null,
+  "experiment_id": "ctrl_phase3c_ci_smoke",
+  "input_artifacts": [
+    "/Users/jinchuli/projects/cholla/r/ctrl_phase3c_ci_smoke_run/iter_0/artifacts/planner_input.json"
+  ],
+  "iteration": 0,
+  "live_lm_used": null,
+  "lm_error": null,
+  "lm_raw_output_artifacts": [],
+  "lm_status": null,
+  "max_attempts": null,
+  "model": null,
+  "output_artifacts": [
+    "/Users/jinchuli/projects/cholla/r/ctrl_phase3c_ci_smoke_run/iter_0/artifacts/plan_spec.json"
+  ],
+  "prompt_input_hash": "ff05d7f0085289fc7ce2a1dd83cd714eb5483014b6daa38ea0279b0596d1689b",
+  "provider": null,
+  "seed": 7,
+  "status": "success",
+  "task_id": "ctrl_phase3c_ci_smoke:ctrl_phase3c_ci_smoke_run:task_0_planner",
+  "temperature": null,
+  "timestamp_utc": "2026-02-17T23:37:49Z"
+}

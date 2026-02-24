@@ -1,0 +1,30 @@
+acceptance_replay_strict: true
+config:
+  controller:
+    max_failures: 1
+    max_iterations: 1
+    max_tool_calls: 4
+    min_success_iters: 1
+    seed: 7
+    walltime_budget_sec: 60.0
+  controller_run_id: ctrl_phase3c_ci_smoke_run
+  experiment_id: ctrl_phase3c_ci_smoke
+  history_path: agent/history/history_phase3c_ci_smoke.jsonl
+  initial_state: {}
+  lm:
+    azure_env_var_names: {}
+    enabled: false
+    flat_tol: 1.0e-06
+    lookback_k: 3
+    max_lm_attempts: 1
+    model: gpt-4o-mini
+    openai_env_var_names: {}
+    provider: openai
+    seed: null
+    temperature: 0.0
+  objective: ci_smoke_wiring
+  out_root: r
+  param_space_path: agent/spec/param_space_v0.yaml
+  tool_backend: mock
+config_path: /Users/jinchuli/projects/cholla/configs/phase3c_ci_smoke.yaml
+controller_version: phase3d_v1

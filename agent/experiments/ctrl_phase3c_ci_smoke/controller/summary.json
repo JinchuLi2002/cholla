@@ -1,0 +1,25 @@
+{
+  "HEAD_SHA": "9ba998b4eaf10e322df1984f400ce425ba14cea9",
+  "acceptance_replay_strict": true,
+  "bundle_files": {
+    "config": "config.json",
+    "config_effective": "config_effective.yaml",
+    "history": "history_controller.jsonl",
+    "iterations": "iterations/",
+    "param_space": "param_space.yaml",
+    "summary": "summary.json"
+  },
+  "cli_invocation": "python -m agent.controller.run_phase3c --domain cholla --config configs/phase3c_ci_smoke.yaml --acceptance_replay_strict",
+  "controller_run_id": "ctrl_phase3c_ci_smoke_run",
+  "controller_version": "phase3d_v1",
+  "experiment_id": "ctrl_phase3c_ci_smoke",
+  "head_sha": "9ba998b4eaf10e322df1984f400ce425ba14cea9",
+  "iterations_total": 1,
+  "lm_model": null,
+  "lm_temperature": null,
+  "max_lm_attempts": null,
+  "run_dir": "/Users/jinchuli/projects/cholla/r/ctrl_phase3c_ci_smoke_run",
+  "seed": 7,
+  "termination_reason": "max_iterations_reached",
+  "tool_backend": "mock"
+}

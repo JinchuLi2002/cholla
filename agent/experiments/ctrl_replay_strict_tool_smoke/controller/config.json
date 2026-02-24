@@ -1,0 +1,18 @@
+{
+  "agent_types": {
+    "planner": "agent.controller.agents.planner.MockPlannerAgent",
+    "summarizer": "agent.controller.agents.summarizer.MockSummarizerAgent"
+  },
+  "controller_run_id": "ctrl_replay_strict_tool_smoke_run",
+  "experiment_id": "ctrl_replay_strict_tool_smoke",
+  "history_path": "/private/tmp/cholla_ctrl_replay_strict_tool_history.jsonl",
+  "linked_experiment_id": null,
+  "max_iterations": 1,
+  "max_tool_calls": 4,
+  "param_space_source_path": "/Users/jinchuli/projects/cholla/agent/spec/param_space_v0.yaml",
+  "run_dir": "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run",
+  "seed": 7,
+  "template_params_path": "/Users/jinchuli/projects/cholla/tests/smoke_cosmo/params.txt",
+  "template_schedule_path": "/Users/jinchuli/projects/cholla/tests/smoke_cosmo/scale_outputs.txt",
+  "walltime_budget_sec": null
+}

@@ -1,0 +1,18 @@
+{
+  "index": 1,
+  "payload": {
+    "out_root": "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_synth_ok/controller/replay/strict/iter_0/backend_runs",
+    "params_text": "# Minimal portable cosmology smoke parameters (Tier 1 Step 0)\n\n# Grid\nnx=64\nny=8\nnz=8\n\n# Runtime/output: one initial dump, no evolution loop\ntout=0.0\noutstep=0.0\n\n# Hydro / IC\ngamma=1.66666667\ninit=Uniform\n\n# Cosmology\nInit_redshift=0.0\nH0=67.66\nOmega_M=0.3111\nOmega_L=0.6889\nOmega_b=0.0486\nscale_outputs_file=tests/smoke_cosmo/scale_outputs.txt\n\n# Domain\nxmin=0.0\nymin=0.0\nzmin=0.0\nxlen=1.0\nylen=1.0\nzlen=1.0\n\n# Periodic boundaries\nxl_bcnd=1\nxu_bcnd=1\nyl_bcnd=1\nyu_bcnd=1\nzl_bcnd=1\nzu_bcnd=1\n\n# Output directory (wrapper should replace __RUN_ID__)\noutdir=./runs/smoke_cosmo/__RUN_ID__/\n\n# Single-rank MPI grid when SET_MPI_GRID is enabled\nn_proc_x=1\nn_proc_y=1\nn_proc_z=1\n",
+    "run_id": "ctrl_replay_strict_synth_ok_run_iter_0000",
+    "schedule_text": "1.0\n"
+  },
+  "result": {
+    "error": "",
+    "run_id": "ctrl_replay_strict_synth_ok_run_iter_0000",
+    "run_manifest_path": "/tmp/fake_manifest",
+    "status": "success"
+  },
+  "status": "success",
+  "timestamp_utc": "2026-02-16T19:13:49Z",
+  "tool": "run_cholla"
+}

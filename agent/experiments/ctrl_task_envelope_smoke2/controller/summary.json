@@ -1,0 +1,15 @@
+{
+  "bundle_files": {
+    "config": "config.json",
+    "history": "history_controller.jsonl",
+    "iterations": "iterations/",
+    "param_space": "param_space.yaml",
+    "summary": "summary.json"
+  },
+  "controller_run_id": "ctrl_task_envelope_smoke2_run",
+  "experiment_id": "ctrl_task_envelope_smoke2",
+  "iterations_total": 1,
+  "run_dir": "/private/tmp/cholla_ctrl_task_smoke_runs/ctrl_task_envelope_smoke2_run",
+  "seed": 0,
+  "termination_reason": "unit_test_stop"
+}

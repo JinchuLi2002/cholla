@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "proposed_params": {
+      "nx": 64
+    }
+  },
+  "rationale": "stop",
+  "should_stop": true,
+  "termination_reason": "unit_test_stop",
+  "tool_calls": [],
+  "version": "v0"
+}

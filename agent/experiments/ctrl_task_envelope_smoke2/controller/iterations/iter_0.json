@@ -1,0 +1,33 @@
+{
+  "RUN_ID": null,
+  "error": null,
+  "iteration": 0,
+  "plan": {
+    "metadata": {
+      "proposed_params": {
+        "nx": 64
+      }
+    },
+    "rationale": "stop",
+    "should_stop": true,
+    "termination_reason": "unit_test_stop",
+    "tool_calls": [],
+    "version": "v0"
+  },
+  "status": "terminated",
+  "summary": {
+    "confidence": 1.0,
+    "observations": [
+      "obs"
+    ],
+    "should_stop": false,
+    "state_patch": {
+      "trend": "flat"
+    },
+    "summary_text": "ok",
+    "termination_reason_hint": null,
+    "version": "v0"
+  },
+  "termination_reason": "unit_test_stop",
+  "tool_results": []
+}

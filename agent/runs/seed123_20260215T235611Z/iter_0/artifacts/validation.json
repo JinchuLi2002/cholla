@@ -1,0 +1,24 @@
+{
+  "checked_patterns": {
+    "data_file_patterns": [
+      "**/*.h5.*"
+    ],
+    "first_snapshot_patterns": [
+      "0/0.h5.0",
+      "**/0.h5.0"
+    ]
+  },
+  "found": {
+    "data_files": [],
+    "first_snapshot_files": []
+  },
+  "missing": [
+    "missing run.log: /Users/jinchuli/projects/cholla/r/5fcbea85/i0/018196872806_smoke_cosmo_2323d7e33aeadbb9/run.log",
+    "missing first snapshot data file (expected one of FIRST_SNAPSHOT_PATTERNS under /Users/jinchuli/projects/cholla/r/5fcbea85/i0/018196872806_smoke_cosmo_2323d7e33aeadbb9)",
+    "no output data files found (checked DATA_FILE_PATTERNS under /Users/jinchuli/projects/cholla/r/5fcbea85/i0/018196872806_smoke_cosmo_2323d7e33aeadbb9)"
+  ],
+  "run_dir": "/Users/jinchuli/projects/cholla/r/5fcbea85/i0/018196872806_smoke_cosmo_2323d7e33aeadbb9",
+  "run_log": "/Users/jinchuli/projects/cholla/r/5fcbea85/i0/018196872806_smoke_cosmo_2323d7e33aeadbb9/run.log",
+  "status": "fail",
+  "timestamp": "2026-02-15T23:56:11.928728+00:00"
+}

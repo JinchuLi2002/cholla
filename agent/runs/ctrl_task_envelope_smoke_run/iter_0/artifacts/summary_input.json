@@ -1,0 +1,346 @@
+{
+  "budgets": {
+    "elapsed_sec": 7.38340022508055e-05,
+    "iterations_completed": 0,
+    "max_iterations": 1,
+    "max_tool_calls": 4,
+    "remaining_iterations": 1,
+    "remaining_tool_calls": 4,
+    "remaining_walltime_sec": null,
+    "tool_calls_used": 0,
+    "walltime_budget_sec": null
+  },
+  "iteration": 0,
+  "param_space": {
+    "description": "Runtime-safe sweep space for Tier 4 short cosmology smoke loops. Parameters map directly to existing key=value entries in params.txt and do not require recompilation.\n",
+    "format": "cholla_params_kv",
+    "global_safety": {
+      "constraints": [
+        {
+          "expr": "nx * ny * nz <= 4096",
+          "name": "max_total_cells",
+          "reason": "Prevent long runtimes and oversized smoke outputs."
+        },
+        {
+          "expr": "nx == ny and ny == nz",
+          "name": "cubic_grid_only",
+          "reason": "Reduce sweep entropy in Phase 1 and keep geometry consistent."
+        },
+        {
+          "expr": "gamma > 1.0",
+          "name": "gamma_positive_constraint",
+          "reason": "Required by runtime checks in initial condition setup."
+        },
+        {
+          "expr": "abs(Omega_M + Omega_L - 1.0) <= 0.05",
+          "name": "omega_sum_near_unity",
+          "reason": "Keep cosmology parameters physically consistent for smoke runs."
+        },
+        {
+          "expr": "0.0 < Omega_b <= Omega_M",
+          "name": "positive_omega_b_less_than_matter",
+          "reason": "Preserve a physically plausible baryon fraction."
+        }
+      ],
+      "fixed_params": {
+        "Omega_b": 0.0486,
+        "init": "Uniform",
+        "n_proc_x": 1,
+        "n_proc_y": 1,
+        "n_proc_z": 1,
+        "outstep": 0.0,
+        "scale_outputs_file": "tests/smoke_cosmo/scale_outputs.txt",
+        "tout": 0.0
+      },
+      "no_recompile": true,
+      "runtime_goal": "short_single_dump"
+    },
+    "key_mapping": {
+      "fixed_keys": [
+        "tout",
+        "outstep",
+        "init",
+        "Omega_b",
+        "scale_outputs_file",
+        "n_proc_x",
+        "n_proc_y",
+        "n_proc_z"
+      ],
+      "params_template": "tests/smoke_cosmo/params.txt",
+      "sweep_keys": [
+        "nx",
+        "ny",
+        "nz",
+        "gamma",
+        "Init_redshift",
+        "H0",
+        "Omega_M",
+        "Omega_L"
+      ]
+    },
+    "name": "tier4_smoke_param_space_v0",
+    "parameters": [
+      {
+        "bounds": {
+          "max": 16,
+          "min": 8,
+          "step": 2
+        },
+        "default": 8,
+        "name": "nx",
+        "notes": "Grid size in x. Kept small to preserve short smoke runtime.",
+        "params_key": "nx",
+        "type": "int"
+      },
+      {
+        "bounds": {
+          "max": 16,
+          "min": 8,
+          "step": 2
+        },
+        "default": 8,
+        "name": "ny",
+        "notes": "Grid size in y. Keep aligned with nx/nz for stable tiny-box sweeps.",
+        "params_key": "ny",
+        "type": "int"
+      },
+      {
+        "bounds": {
+          "max": 16,
+          "min": 8,
+          "step": 2
+        },
+        "default": 8,
+        "name": "nz",
+        "notes": "Grid size in z. Upper bound chosen to keep total cells small.",
+        "params_key": "nz",
+        "type": "int"
+      },
+      {
+        "bounds": {
+          "max": 1.8,
+          "min": 1.05
+        },
+        "default": 1.66666667,
+        "name": "gamma",
+        "notes": "Hydro adiabatic index; must remain > 1.0.",
+        "params_key": "gamma",
+        "type": "float"
+      },
+      {
+        "bounds": {
+          "max": 0.5,
+          "min": 0.0
+        },
+        "default": 0.0,
+        "name": "Init_redshift",
+        "notes": "Narrowed in Phase 1 to reduce low-value exploration noise.",
+        "params_key": "Init_redshift",
+        "type": "float"
+      },
+      {
+        "bounds": {
+          "max": 75.0,
+          "min": 60.0
+        },
+        "default": 67.66,
+        "name": "H0",
+        "notes": "Hubble parameter used by cosmology initialization.",
+        "params_key": "H0",
+        "type": "float"
+      },
+      {
+        "bounds": {
+          "max": 0.4,
+          "min": 0.2
+        },
+        "default": 0.3111,
+        "name": "Omega_M",
+        "notes": "Matter density parameter; constrained with Omega_L and Omega_b.",
+        "params_key": "Omega_M",
+        "type": "float"
+      },
+      {
+        "bounds": {
+          "max": 0.8,
+          "min": 0.6
+        },
+        "default": 0.6889,
+        "name": "Omega_L",
+        "notes": "Dark-energy density parameter; constrained with Omega_M.",
+        "params_key": "Omega_L",
+        "type": "float"
+      }
+    ],
+    "template_params_path": "tests/smoke_cosmo/params.txt",
+    "version": 0
+  },
+  "state": {
+    "history_path": "/Users/jinchuli/projects/cholla/agent/history/history.jsonl",
+    "history_records": [],
+    "param_space": {
+      "description": "Runtime-safe sweep space for Tier 4 short cosmology smoke loops. Parameters map directly to existing key=value entries in params.txt and do not require recompilation.\n",
+      "format": "cholla_params_kv",
+      "global_safety": {
+        "constraints": [
+          {
+            "expr": "nx * ny * nz <= 4096",
+            "name": "max_total_cells",
+            "reason": "Prevent long runtimes and oversized smoke outputs."
+          },
+          {
+            "expr": "nx == ny and ny == nz",
+            "name": "cubic_grid_only",
+            "reason": "Reduce sweep entropy in Phase 1 and keep geometry consistent."
+          },
+          {
+            "expr": "gamma > 1.0",
+            "name": "gamma_positive_constraint",
+            "reason": "Required by runtime checks in initial condition setup."
+          },
+          {
+            "expr": "abs(Omega_M + Omega_L - 1.0) <= 0.05",
+            "name": "omega_sum_near_unity",
+            "reason": "Keep cosmology parameters physically consistent for smoke runs."
+          },
+          {
+            "expr": "0.0 < Omega_b <= Omega_M",
+            "name": "positive_omega_b_less_than_matter",
+            "reason": "Preserve a physically plausible baryon fraction."
+          }
+        ],
+        "fixed_params": {
+          "Omega_b": 0.0486,
+          "init": "Uniform",
+          "n_proc_x": 1,
+          "n_proc_y": 1,
+          "n_proc_z": 1,
+          "outstep": 0.0,
+          "scale_outputs_file": "tests/smoke_cosmo/scale_outputs.txt",
+          "tout": 0.0
+        },
+        "no_recompile": true,
+        "runtime_goal": "short_single_dump"
+      },
+      "key_mapping": {
+        "fixed_keys": [
+          "tout",
+          "outstep",
+          "init",
+          "Omega_b",
+          "scale_outputs_file",
+          "n_proc_x",
+          "n_proc_y",
+          "n_proc_z"
+        ],
+        "params_template": "tests/smoke_cosmo/params.txt",
+        "sweep_keys": [
+          "nx",
+          "ny",
+          "nz",
+          "gamma",
+          "Init_redshift",
+          "H0",
+          "Omega_M",
+          "Omega_L"
+        ]
+      },
+      "name": "tier4_smoke_param_space_v0",
+      "parameters": [
+        {
+          "bounds": {
+            "max": 16,
+            "min": 8,
+            "step": 2
+          },
+          "default": 8,
+          "name": "nx",
+          "notes": "Grid size in x. Kept small to preserve short smoke runtime.",
+          "params_key": "nx",
+          "type": "int"
+        },
+        {
+          "bounds": {
+            "max": 16,
+            "min": 8,
+            "step": 2
+          },
+          "default": 8,
+          "name": "ny",
+          "notes": "Grid size in y. Keep aligned with nx/nz for stable tiny-box sweeps.",
+          "params_key": "ny",
+          "type": "int"
+        },
+        {
+          "bounds": {
+            "max": 16,
+            "min": 8,
+            "step": 2
+          },
+          "default": 8,
+          "name": "nz",
+          "notes": "Grid size in z. Upper bound chosen to keep total cells small.",
+          "params_key": "nz",
+          "type": "int"
+        },
+        {
+          "bounds": {
+            "max": 1.8,
+            "min": 1.05
+          },
+          "default": 1.66666667,
+          "name": "gamma",
+          "notes": "Hydro adiabatic index; must remain > 1.0.",
+          "params_key": "gamma",
+          "type": "float"
+        },
+        {
+          "bounds": {
+            "max": 0.5,
+            "min": 0.0
+          },
+          "default": 0.0,
+          "name": "Init_redshift",
+          "notes": "Narrowed in Phase 1 to reduce low-value exploration noise.",
+          "params_key": "Init_redshift",
+          "type": "float"
+        },
+        {
+          "bounds": {
+            "max": 75.0,
+            "min": 60.0
+          },
+          "default": 67.66,
+          "name": "H0",
+          "notes": "Hubble parameter used by cosmology initialization.",
+          "params_key": "H0",
+          "type": "float"
+        },
+        {
+          "bounds": {
+            "max": 0.4,
+            "min": 0.2
+          },
+          "default": 0.3111,
+          "name": "Omega_M",
+          "notes": "Matter density parameter; constrained with Omega_L and Omega_b.",
+          "params_key": "Omega_M",
+          "type": "float"
+        },
+        {
+          "bounds": {
+            "max": 0.8,
+            "min": 0.6
+          },
+          "default": 0.6889,
+          "name": "Omega_L",
+          "notes": "Dark-energy density parameter; constrained with Omega_M.",
+          "params_key": "Omega_L",
+          "type": "float"
+        }
+      ],
+      "template_params_path": "tests/smoke_cosmo/params.txt",
+      "version": 0
+    }
+  }
+}

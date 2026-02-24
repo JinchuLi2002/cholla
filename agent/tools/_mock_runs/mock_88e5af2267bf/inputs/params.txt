@@ -1,0 +1,8 @@
+H0=67.66
+Init_redshift=0.0
+Omega_L=0.6889
+Omega_M=0.3111
+gamma=1.66666667
+nx=12
+ny=12
+nz=12

@@ -1,0 +1,30 @@
+{
+  "agent_card": {
+    "capabilities": [
+      "plan.next_params",
+      "plan.stop_decision",
+      "tool_call_advisory"
+    ],
+    "input_schema": "agent.controller.specs:PLANNER_INPUT_V0_SCHEMA",
+    "name": "tier4.phase3c.planner",
+    "output_schema": "agent.controller.specs:PLANNER_OUTPUT_V0_SCHEMA",
+    "version": "0.1.0"
+  },
+  "agent_kind": "planner",
+  "controller_run_id": "ctrl_task_envelope_smoke_run",
+  "error": null,
+  "experiment_id": "ctrl_task_envelope_smoke",
+  "input_artifacts": [
+    "/Users/jinchuli/projects/cholla/agent/runs/ctrl_task_envelope_smoke_run/iter_0/artifacts/planner_input.json"
+  ],
+  "iteration": 0,
+  "model": "dummy-planner",
+  "output_artifacts": [
+    "/Users/jinchuli/projects/cholla/agent/runs/ctrl_task_envelope_smoke_run/iter_0/artifacts/plan_spec.json"
+  ],
+  "prompt_input_hash": "414c8f204943d35d516ec8486fe4a50148c77a7fe82f221010c0381bc0e7a976",
+  "status": "success",
+  "task_id": "ctrl_task_envelope_smoke:ctrl_task_envelope_smoke_run:task_0_planner",
+  "temperature": 0.0,
+  "timestamp_utc": "2026-02-16T19:05:27Z"
+}

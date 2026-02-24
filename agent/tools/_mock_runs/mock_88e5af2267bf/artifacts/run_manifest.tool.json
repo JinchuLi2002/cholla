@@ -1,0 +1,18 @@
+{
+  "params": {
+    "H0": 67.66,
+    "Init_redshift": 0.0,
+    "Omega_L": 0.6889,
+    "Omega_M": 0.3111,
+    "gamma": 1.66666667,
+    "nx": 12,
+    "ny": 12,
+    "nz": 12
+  },
+  "run_dir": "/Users/jinchuli/projects/cholla/agent/tools/_mock_runs/mock_88e5af2267bf",
+  "run_id": "mock_88e5af2267bf",
+  "run_log": "run.log",
+  "schedule_sha256": "5717e7c840171019a4eeab5b79a7f894a4986eaff93d04ec5b12c9a189f594bf",
+  "status": "success",
+  "tool_backend": "mock"
+}

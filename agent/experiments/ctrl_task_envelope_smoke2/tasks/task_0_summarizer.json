@@ -1,0 +1,30 @@
+{
+  "agent_card": {
+    "capabilities": [
+      "summarize.history",
+      "trend.detect",
+      "stop_hint"
+    ],
+    "input_schema": "agent.controller.specs:SUMMARIZER_INPUT_V0_SCHEMA",
+    "name": "tier4.phase3c.summarizer",
+    "output_schema": "agent.controller.specs:SUMMARIZER_OUTPUT_V0_SCHEMA",
+    "version": "0.1.0"
+  },
+  "agent_kind": "summarizer",
+  "controller_run_id": "ctrl_task_envelope_smoke2_run",
+  "error": null,
+  "experiment_id": "ctrl_task_envelope_smoke2",
+  "input_artifacts": [
+    "/private/tmp/cholla_ctrl_task_smoke_runs/ctrl_task_envelope_smoke2_run/iter_0/artifacts/summary_input.json"
+  ],
+  "iteration": 0,
+  "model": "dummy-summarizer",
+  "output_artifacts": [
+    "/private/tmp/cholla_ctrl_task_smoke_runs/ctrl_task_envelope_smoke2_run/iter_0/artifacts/summary_spec.json"
+  ],
+  "prompt_input_hash": "3592a457fccaaf1f829450fdbcb9fc32c59276bf7eb2b7a86c119fad63832182",
+  "status": "success",
+  "task_id": "ctrl_task_envelope_smoke2:ctrl_task_envelope_smoke2_run:task_0_summarizer",
+  "temperature": 0.0,
+  "timestamp_utc": "2026-02-16T19:06:25Z"
+}

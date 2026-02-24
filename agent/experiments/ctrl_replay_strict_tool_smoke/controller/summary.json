@@ -1,0 +1,15 @@
+{
+  "bundle_files": {
+    "config": "config.json",
+    "history": "history_controller.jsonl",
+    "iterations": "iterations/",
+    "param_space": "param_space.yaml",
+    "summary": "summary.json"
+  },
+  "controller_run_id": "ctrl_replay_strict_tool_smoke_run",
+  "experiment_id": "ctrl_replay_strict_tool_smoke",
+  "iterations_total": 1,
+  "run_dir": "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run",
+  "seed": 7,
+  "termination_reason": "tool_error"
+}

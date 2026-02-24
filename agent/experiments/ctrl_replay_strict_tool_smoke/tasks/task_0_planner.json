@@ -1,0 +1,30 @@
+{
+  "agent_card": {
+    "capabilities": [
+      "plan.next_params",
+      "plan.stop_decision",
+      "tool_call_advisory"
+    ],
+    "input_schema": "agent.controller.specs:PLANNER_INPUT_V0_SCHEMA",
+    "name": "tier4.phase3c.planner",
+    "output_schema": "agent.controller.specs:PLANNER_OUTPUT_V0_SCHEMA",
+    "version": "0.1.0"
+  },
+  "agent_kind": "planner",
+  "controller_run_id": "ctrl_replay_strict_tool_smoke_run",
+  "error": null,
+  "experiment_id": "ctrl_replay_strict_tool_smoke",
+  "input_artifacts": [
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/artifacts/planner_input.json"
+  ],
+  "iteration": 0,
+  "model": null,
+  "output_artifacts": [
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/artifacts/plan_spec.json"
+  ],
+  "prompt_input_hash": "24a556dfc6511d108d82115766ec0d6a41d7e5ab4c6d6b05f4e85b5a1cb30c84",
+  "status": "success",
+  "task_id": "ctrl_replay_strict_tool_smoke:ctrl_replay_strict_tool_smoke_run:task_0_planner",
+  "temperature": null,
+  "timestamp_utc": "2026-02-16T19:12:17Z"
+}

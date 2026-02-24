@@ -1,0 +1,18 @@
+{
+  "agent_types": {
+    "planner": "__main__.DummyPlanner",
+    "summarizer": "__main__.DummySummarizer"
+  },
+  "controller_run_id": "ctrl_task_envelope_smoke_run",
+  "experiment_id": "ctrl_task_envelope_smoke",
+  "history_path": "/Users/jinchuli/projects/cholla/agent/history/history.jsonl",
+  "linked_experiment_id": null,
+  "max_iterations": 1,
+  "max_tool_calls": 4,
+  "param_space_source_path": "/Users/jinchuli/projects/cholla/agent/spec/param_space_v0.yaml",
+  "run_dir": "/Users/jinchuli/projects/cholla/agent/runs/ctrl_task_envelope_smoke_run",
+  "seed": 0,
+  "template_params_path": "/Users/jinchuli/projects/cholla/tests/smoke_cosmo/params.txt",
+  "template_schedule_path": "/Users/jinchuli/projects/cholla/tests/smoke_cosmo/scale_outputs.txt",
+  "walltime_budget_sec": null
+}

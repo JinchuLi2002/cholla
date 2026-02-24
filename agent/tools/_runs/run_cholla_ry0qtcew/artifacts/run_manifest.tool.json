@@ -1,0 +1,36 @@
+{
+  "command": [
+    "bash",
+    "/Users/jinchuli/projects/cholla/scripts/colab_smoke.sh",
+    "--params",
+    "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/inputs/params.txt",
+    "--schedule",
+    "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/inputs/scale_outputs.txt",
+    "--out-root",
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs",
+    "--run-id",
+    "ctrl_replay_strict_tool_smoke_run_iter_0000"
+  ],
+  "exit_code": 2,
+  "produced_files": [
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/README.snapshot.txt",
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/inputs/params.txt",
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/inputs/scale_outputs.txt",
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/params.run.txt",
+    "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/validator.json"
+  ],
+  "run_dir": "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000",
+  "run_id": "ctrl_replay_strict_tool_smoke_run_iter_0000",
+  "staging": {
+    "params_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/inputs/params.txt",
+    "schedule_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/inputs/scale_outputs.txt",
+    "stage_dir": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew",
+    "stderr_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/logs/colab_smoke.stderr.log",
+    "stdout_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/logs/colab_smoke.stdout.log",
+    "tool_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_ry0qtcew/logs/run_cholla.log"
+  },
+  "status": "failed",
+  "timestamp_utc": "2026-02-16T19:12:18Z",
+  "tool": "run_cholla",
+  "validation_path": "/private/tmp/cholla_ctrl_replay_strict_tool_runs/ctrl_replay_strict_tool_smoke_run/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/validator.json"
+}

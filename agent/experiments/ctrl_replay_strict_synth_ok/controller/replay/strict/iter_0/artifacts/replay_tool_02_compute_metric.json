@@ -1,0 +1,16 @@
+{
+  "index": 2,
+  "payload": {
+    "run_manifest_path": "/tmp/fake_manifest"
+  },
+  "result": {
+    "details": {
+      "status": "success"
+    },
+    "metric_name": "synthetic",
+    "scalar": 1.23
+  },
+  "status": "success",
+  "timestamp_utc": "2026-02-16T19:13:49Z",
+  "tool": "compute_metric"
+}

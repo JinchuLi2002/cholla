@@ -1,0 +1,13 @@
+{
+  "confidence": 1.0,
+  "observations": [
+    "obs"
+  ],
+  "should_stop": false,
+  "state_patch": {
+    "trend": "flat"
+  },
+  "summary_text": "ok",
+  "termination_reason_hint": null,
+  "version": "v0"
+}

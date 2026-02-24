@@ -1,0 +1,31 @@
+{
+  "index": 1,
+  "payload": {
+    "out_root": "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs",
+    "params_text": "# Minimal portable cosmology smoke parameters (Tier 1 Step 0)\n\n# Grid\nnx=12\nny=12\nnz=12\n\n# Runtime/output: one initial dump, no evolution loop\ntout=0.0\noutstep=0.0\n\n# Hydro / IC\ngamma=1.66666667\ninit=Uniform\n\n# Cosmology\nInit_redshift=0.0\nH0=67.66\nOmega_M=0.3111\nOmega_L=0.6889\nOmega_b=0.0486\nscale_outputs_file=tests/smoke_cosmo/scale_outputs.txt\n\n# Domain\nxmin=0.0\nymin=0.0\nzmin=0.0\nxlen=1.0\nylen=1.0\nzlen=1.0\n\n# Periodic boundaries\nxl_bcnd=1\nxu_bcnd=1\nyl_bcnd=1\nyu_bcnd=1\nzl_bcnd=1\nzu_bcnd=1\n\n# Output directory (wrapper should replace __RUN_ID__)\noutdir=./runs/smoke_cosmo/__RUN_ID__/\n\n# Single-rank MPI grid when SET_MPI_GRID is enabled\nn_proc_x=1\nn_proc_y=1\nn_proc_z=1\n",
+    "run_id": "ctrl_replay_strict_tool_smoke_run_iter_0000",
+    "schedule_text": "1.0\n"
+  },
+  "result": {
+    "error": "colab_smoke exited with code 2: make: *** [src/analysis/analysis.o] Error 127",
+    "exit_code": 2,
+    "produced_files": [
+      "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/README.snapshot.txt",
+      "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/inputs/params.txt",
+      "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/inputs/scale_outputs.txt",
+      "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/params.run.txt",
+      "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/validator.json"
+    ],
+    "run_dir": "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000",
+    "run_id": "ctrl_replay_strict_tool_smoke_run_iter_0000",
+    "run_manifest_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_yp2oydpm/artifacts/run_manifest.tool.json",
+    "status": "failed",
+    "stderr_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_yp2oydpm/logs/colab_smoke.stderr.log",
+    "stdout_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_yp2oydpm/logs/colab_smoke.stdout.log",
+    "tool_log_path": "/Users/jinchuli/projects/cholla/agent/tools/_runs/run_cholla_yp2oydpm/logs/run_cholla.log",
+    "validation_path": "/Users/jinchuli/projects/cholla/agent/experiments/ctrl_replay_strict_tool_smoke/controller/replay/strict/iter_0/backend_runs/ctrl_replay_strict_tool_smoke_run_iter_0000/validator.json"
+  },
+  "status": "failed",
+  "timestamp_utc": "2026-02-16T19:12:18Z",
+  "tool": "run_cholla"
+}

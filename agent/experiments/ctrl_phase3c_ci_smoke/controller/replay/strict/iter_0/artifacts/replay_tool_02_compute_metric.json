@@ -1,0 +1,20 @@
+{
+  "index": 2,
+  "payload": {
+    "run_manifest_path": "/private/var/folders/1g/wc8l7sb96qs9q8zydq6qwk5w0000gn/T/cholla_replay/d79634ff94/iter_0/backend_runs/mock_ccc4c2bcf0d5/artifacts/run_manifest.tool.json"
+  },
+  "result": {
+    "details": {
+      "formula": "scalar = round(Init_redshift, 6)",
+      "run_id": "mock_ccc4c2bcf0d5",
+      "run_manifest_path": "/private/var/folders/1g/wc8l7sb96qs9q8zydq6qwk5w0000gn/T/cholla_replay/d79634ff94/iter_0/backend_runs/mock_ccc4c2bcf0d5/artifacts/run_manifest.tool.json",
+      "status": "success",
+      "tool_backend": "mock"
+    },
+    "metric_name": "mock_density_scalar_v1",
+    "scalar": 0.0
+  },
+  "status": "success",
+  "timestamp_utc": "2026-02-17T23:37:49Z",
+  "tool": "compute_metric"
+}

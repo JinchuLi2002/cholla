@@ -1,0 +1,15 @@
+{
+  "index": 0,
+  "payload": {
+    "params": {
+      "nx": 64
+    }
+  },
+  "result": {
+    "errors": [],
+    "valid": true
+  },
+  "status": "success",
+  "timestamp_utc": "2026-02-16T19:13:49Z",
+  "tool": "validate_params"
+}

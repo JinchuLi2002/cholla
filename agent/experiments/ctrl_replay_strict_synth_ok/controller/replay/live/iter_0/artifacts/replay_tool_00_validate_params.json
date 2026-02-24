@@ -1,0 +1,17 @@
+{
+  "index": 0,
+  "payload": {
+    "params": {
+      "nx": 64
+    }
+  },
+  "result": {
+    "errors": [
+      "missing required params: H0, Init_redshift, Omega_L, Omega_M, gamma, ny, nz"
+    ],
+    "valid": false
+  },
+  "status": "failed",
+  "timestamp_utc": "2026-02-16T19:13:57Z",
+  "tool": "validate_params"
+}

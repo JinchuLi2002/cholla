@@ -1,0 +1,44 @@
+{
+  "budgets": {
+    "elapsed_sec": 0.002123666985426098,
+    "iterations_completed": 0,
+    "max_iterations": 1,
+    "max_tool_calls": 4,
+    "remaining_iterations": 1,
+    "remaining_tool_calls": 4,
+    "remaining_walltime_sec": null,
+    "tool_calls_used": 0,
+    "walltime_budget_sec": null
+  },
+  "controller_run_id": "ctrl_task_envelope_smoke_run",
+  "error": null,
+  "iteration": 0,
+  "plan": {
+    "metadata": {
+      "proposed_params": {
+        "nx": 64
+      }
+    },
+    "rationale": "stop",
+    "should_stop": true,
+    "termination_reason": "unit_test_stop",
+    "tool_calls": [],
+    "version": "v0"
+  },
+  "status": "terminated",
+  "summary": {
+    "confidence": 1.0,
+    "observations": [
+      "obs"
+    ],
+    "should_stop": false,
+    "state_patch": {
+      "trend": "flat"
+    },
+    "summary_text": "ok",
+    "termination_reason_hint": null,
+    "version": "v0"
+  },
+  "termination_reason": "unit_test_stop",
+  "tool_results": []
+}
