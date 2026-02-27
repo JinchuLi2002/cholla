@@ -1053,7 +1053,7 @@ void AnalysisModule::Transfer_Skewers_Data(int axis)
     #endif
 
     #ifdef MPI_CHOLLA
-  vector<int> mpi_indices;
+  std::vector<int> mpi_indices;
   MPI_Status mpi_status;
 
     #endif

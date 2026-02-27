@@ -283,9 +283,9 @@ class AnalysisModule
   Real *mpi_domain_boundary_x;
   Real *mpi_domain_boundary_y;
   Real *mpi_domain_boundary_z;
-  vector<int> mpi_indices_x;
-  vector<int> mpi_indices_y;
-  vector<int> mpi_indices_z;
+  std::vector<int> mpi_indices_x;
+  std::vector<int> mpi_indices_y;
+  std::vector<int> mpi_indices_z;
       #endif
 
     #endif
