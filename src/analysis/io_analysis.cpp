@@ -632,17 +632,24 @@ void Grid3D::Write_Analysis_Data_HDF5(hid_t file_id)
 
   group_id = H5Gcreate(file_id, "/lya_statistics", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-  attribute_id = H5Acreate(group_id, "n_skewers", H5T_STD_I32BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT);
+  // Always create a scalar dataspace for lya_statistics attributes.
+  // When PHASE_DIAGRAM is disabled, the reused dataspace_id can be invalid.
+  hsize_t attr_dims_lya = 1;
+  hid_t dataspace_id_lya = H5Screate_simple(1, &attr_dims_lya, NULL);
+
+  attribute_id = H5Acreate(group_id, "n_skewers", H5T_STD_I32BE, dataspace_id_lya, H5P_DEFAULT, H5P_DEFAULT);
   status       = H5Awrite(attribute_id, H5T_NATIVE_INT, &Analysis.n_skewers_processed);
   status       = H5Aclose(attribute_id);
 
-  attribute_id = H5Acreate(group_id, "Flux_mean_HI", H5T_IEEE_F64BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT);
+  attribute_id = H5Acreate(group_id, "Flux_mean_HI", H5T_IEEE_F64BE, dataspace_id_lya, H5P_DEFAULT, H5P_DEFAULT);
   status       = H5Awrite(attribute_id, H5T_NATIVE_DOUBLE, &Analysis.Flux_mean_HI);
   status       = H5Aclose(attribute_id);
 
-  attribute_id = H5Acreate(group_id, "Flux_mean_HeII", H5T_IEEE_F64BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT);
+  attribute_id = H5Acreate(group_id, "Flux_mean_HeII", H5T_IEEE_F64BE, dataspace_id_lya, H5P_DEFAULT, H5P_DEFAULT);
   status       = H5Awrite(attribute_id, H5T_NATIVE_DOUBLE, &Analysis.Flux_mean_HeII);
   status       = H5Aclose(attribute_id);
+
+  status = H5Sclose(dataspace_id_lya);
 
   if (Analysis.Computed_Flux_Power_Spectrum == 1) {
     hid_t ps_group, dataspace_id_ps;

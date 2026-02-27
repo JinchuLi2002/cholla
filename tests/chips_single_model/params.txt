@@ -2,9 +2,11 @@
 # Uses built-in ICs (no external IC file dependency).
 
 # Grid
-nx=256
-ny=256
-nz=256
+# 128^3 keeps the CHIPS debug preset within Colab GPU memory while preserving
+# end-to-end analysis wiring.
+nx=128
+ny=128
+nz=128
 
 # Runtime controls
 tout=100000.0
