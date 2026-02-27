@@ -22,12 +22,16 @@ RUN_OUTDIR=""
 RUN_LOG=""
 RUN_PARAMS=""
 SCHEDULE_PATH=""
+ANALYSIS_SCHEDULE_PATH=""
 PARAMS_SOURCE_PATH=""
 SCHEDULE_SOURCE_PATH=""
+ANALYSIS_SCHEDULE_SOURCE_PATH=""
 RUN_INPUT_PARAMS=""
 RUN_INPUT_SCHEDULE=""
+RUN_INPUT_ANALYSIS_SCHEDULE=""
 OUT_ROOT_USED=""
 RUN_PRESET="smoke_cosmo"
+RUN_PRESET_DIR="tests/smoke_cosmo"
 RUN_ID_OVERRIDE=""
 GIT_SHA_SHORT="unknown"
 INPUT_HASH="unknown"
@@ -59,11 +63,14 @@ sed_escape_replacement() {
 
 usage() {
   cat <<'EOF'
-Usage: bash scripts/colab_smoke.sh [--params PATH] [--schedule PATH] [--out-root PATH] [--run-id RUN_ID]
+Usage: bash scripts/colab_smoke.sh [--preset DIR] [--params PATH] [--schedule PATH] [--analysis-schedule PATH] [--out-root PATH] [--run-id RUN_ID]
 
 Options:
+  --preset DIR      Preset directory. Uses DIR/params.txt and DIR/scale_outputs.txt unless overridden (default: tests/smoke_cosmo)
   --params PATH     Parameter template file (default: tests/smoke_cosmo/params.txt)
   --schedule PATH   scale_outputs file (default: tests/smoke_cosmo/scale_outputs.txt)
+  --analysis-schedule PATH
+                    Optional analysis_scale_outputs file. If provided (or found as DIR/analysis_scale_outputs.txt), it is staged and wired into params.
   --out-root PATH   Root directory for run outputs (default: runs/smoke_cosmo)
   --run-id RUN_ID   Explicit run id. If omitted, run id is computed from effective inputs.
   -h, --help        Show this help text.
@@ -71,19 +78,31 @@ EOF
 }
 
 parse_args() {
-  EFFECTIVE_PARAMS="tests/smoke_cosmo/params.txt"
-  EFFECTIVE_SCHEDULE="tests/smoke_cosmo/scale_outputs.txt"
-  OUT_ROOT_USED="runs/smoke_cosmo"
+  local params_override=""
+  local schedule_override=""
+  local analysis_schedule_override=""
+  local out_root_override=""
+
+  RUN_PRESET_DIR="tests/smoke_cosmo"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --preset)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --preset" >&2
+          usage >&2
+          exit 2
+        fi
+        RUN_PRESET_DIR="$2"
+        shift 2
+        ;;
       --params)
         if [[ $# -lt 2 ]]; then
           echo "Missing value for --params" >&2
           usage >&2
           exit 2
         fi
-        EFFECTIVE_PARAMS="$2"
+        params_override="$2"
         shift 2
         ;;
       --schedule)
@@ -92,7 +111,16 @@ parse_args() {
           usage >&2
           exit 2
         fi
-        EFFECTIVE_SCHEDULE="$2"
+        schedule_override="$2"
+        shift 2
+        ;;
+      --analysis-schedule)
+        if [[ $# -lt 2 ]]; then
+          echo "Missing value for --analysis-schedule" >&2
+          usage >&2
+          exit 2
+        fi
+        analysis_schedule_override="$2"
         shift 2
         ;;
       --out-root)
@@ -101,7 +129,7 @@ parse_args() {
           usage >&2
           exit 2
         fi
-        OUT_ROOT_USED="$2"
+        out_root_override="$2"
         shift 2
         ;;
       --run-id)
@@ -125,6 +153,43 @@ parse_args() {
         ;;
     esac
   done
+
+  RUN_PRESET_DIR="${RUN_PRESET_DIR%/}"
+  if [[ -z "${RUN_PRESET_DIR}" ]]; then
+    echo "Invalid --preset (empty value)" >&2
+    exit 2
+  fi
+
+  RUN_PRESET="$(basename "${RUN_PRESET_DIR}")"
+  if [[ -z "${RUN_PRESET}" || "${RUN_PRESET}" == "." ]]; then
+    RUN_PRESET="smoke_cosmo"
+  fi
+
+  if [[ -n "${params_override}" ]]; then
+    EFFECTIVE_PARAMS="${params_override}"
+  else
+    EFFECTIVE_PARAMS="${RUN_PRESET_DIR}/params.txt"
+  fi
+
+  if [[ -n "${schedule_override}" ]]; then
+    EFFECTIVE_SCHEDULE="${schedule_override}"
+  else
+    EFFECTIVE_SCHEDULE="${RUN_PRESET_DIR}/scale_outputs.txt"
+  fi
+
+  if [[ -n "${analysis_schedule_override}" ]]; then
+    EFFECTIVE_ANALYSIS_SCHEDULE="${analysis_schedule_override}"
+  elif [[ -f "${RUN_PRESET_DIR}/analysis_scale_outputs.txt" ]]; then
+    EFFECTIVE_ANALYSIS_SCHEDULE="${RUN_PRESET_DIR}/analysis_scale_outputs.txt"
+  else
+    EFFECTIVE_ANALYSIS_SCHEDULE=""
+  fi
+
+  if [[ -n "${out_root_override}" ]]; then
+    OUT_ROOT_USED="${out_root_override}"
+  else
+    OUT_ROOT_USED="runs/${RUN_PRESET}"
+  fi
 }
 write_env_colab() {
   local git_sha_full="unknown"
@@ -298,10 +363,13 @@ PY
   RUN_LOG="${RUN_LOG}" \
   RUN_PARAMS="${RUN_PARAMS}" \
   SCHEDULE_PATH="${SCHEDULE_PATH}" \
+  ANALYSIS_SCHEDULE_PATH="${ANALYSIS_SCHEDULE_PATH}" \
   PARAMS_SOURCE_PATH="${PARAMS_SOURCE_PATH}" \
   SCHEDULE_SOURCE_PATH="${SCHEDULE_SOURCE_PATH}" \
+  ANALYSIS_SCHEDULE_SOURCE_PATH="${ANALYSIS_SCHEDULE_SOURCE_PATH}" \
   RUN_INPUT_PARAMS="${RUN_INPUT_PARAMS}" \
   RUN_INPUT_SCHEDULE="${RUN_INPUT_SCHEDULE}" \
+  RUN_INPUT_ANALYSIS_SCHEDULE="${RUN_INPUT_ANALYSIS_SCHEDULE}" \
   OUT_ROOT_USED="${OUT_ROOT_USED}" \
   BINARY_PATH="${BINARY_PATH}" \
   BUILD_CMD_USED="${BUILD_CMD_USED}" \
@@ -332,6 +400,7 @@ manifest = {
     "binary_path": os.environ["BINARY_PATH"],
     "params_path": os.environ["RUN_PARAMS"],
     "schedule_path": os.environ["SCHEDULE_PATH"],
+    "analysis_schedule_path": os.environ["ANALYSIS_SCHEDULE_PATH"],
     "run_dir": os.environ["RUN_DIR"],
     "produced_files": read_lines(os.environ["PRODUCED_FILES_FILE"]),
     "validation": {
@@ -352,12 +421,15 @@ manifest = {
     # Canonical provenance keys for effective input source locations.
     "source_params_path": os.environ["PARAMS_SOURCE_PATH"],
     "source_schedule_path": os.environ["SCHEDULE_SOURCE_PATH"],
+    "source_analysis_schedule_path": os.environ["ANALYSIS_SCHEDULE_SOURCE_PATH"],
     # Deprecated legacy aliases; keep for backward compatibility while
     # downstream readers migrate to source_* keys.
     "params_source_path": os.environ["PARAMS_SOURCE_PATH"],
     "schedule_source_path": os.environ["SCHEDULE_SOURCE_PATH"],
+    "analysis_schedule_source_path": os.environ["ANALYSIS_SCHEDULE_SOURCE_PATH"],
     "input_params_copy": os.environ["RUN_INPUT_PARAMS"],
     "input_schedule_copy": os.environ["RUN_INPUT_SCHEDULE"],
+    "input_analysis_schedule_copy": os.environ["RUN_INPUT_ANALYSIS_SCHEDULE"],
     "out_root": os.environ["OUT_ROOT_USED"],
     "build_cmd": os.environ["BUILD_CMD_USED"],
     "run_cmd": os.environ["RUN_CMD_USED"],
@@ -496,6 +568,7 @@ write_env_colab
 
 PARAMS_SOURCE_PATH="${EFFECTIVE_PARAMS}"
 SCHEDULE_SOURCE_PATH="${EFFECTIVE_SCHEDULE}"
+ANALYSIS_SCHEDULE_SOURCE_PATH="${EFFECTIVE_ANALYSIS_SCHEDULE}"
 
 if [[ -z "${OUT_ROOT_USED}" ]]; then
   echo "Invalid --out-root (empty value)" >&2
@@ -510,8 +583,16 @@ if [[ ! -f "${SCHEDULE_SOURCE_PATH}" ]]; then
   echo "Missing ${SCHEDULE_SOURCE_PATH}" >&2
   exit 2
 fi
+if [[ -n "${ANALYSIS_SCHEDULE_SOURCE_PATH}" ]] && [[ ! -f "${ANALYSIS_SCHEDULE_SOURCE_PATH}" ]]; then
+  echo "Missing ${ANALYSIS_SCHEDULE_SOURCE_PATH}" >&2
+  exit 2
+fi
 
-INPUT_HASH="$(cat "${PARAMS_SOURCE_PATH}" "${SCHEDULE_SOURCE_PATH}" | sha256_stream)"
+if [[ -n "${ANALYSIS_SCHEDULE_SOURCE_PATH}" ]]; then
+  INPUT_HASH="$(cat "${PARAMS_SOURCE_PATH}" "${SCHEDULE_SOURCE_PATH}" "${ANALYSIS_SCHEDULE_SOURCE_PATH}" | sha256_stream)"
+else
+  INPUT_HASH="$(cat "${PARAMS_SOURCE_PATH}" "${SCHEDULE_SOURCE_PATH}" | sha256_stream)"
+fi
 if [[ -n "${RUN_ID_OVERRIDE}" ]]; then
   RUN_ID="${RUN_ID_OVERRIDE}"
 else
@@ -523,13 +604,24 @@ RUN_OUTDIR="${RUN_DIR}"
 RUN_LOG="${RUN_DIR}/run.log"
 RUN_INPUT_PARAMS="${RUN_DIR}/inputs/params.txt"
 RUN_INPUT_SCHEDULE="${RUN_DIR}/inputs/scale_outputs.txt"
+RUN_INPUT_ANALYSIS_SCHEDULE="${RUN_DIR}/inputs/analysis_scale_outputs.txt"
 RUN_PARAMS="${RUN_DIR}/params.run.txt"
 SCHEDULE_PATH="${RUN_INPUT_SCHEDULE}"
+ANALYSIS_SCHEDULE_PATH=""
 
 mkdir -p "${RUN_DIR}/inputs"
 cp "${PARAMS_SOURCE_PATH}" "${RUN_INPUT_PARAMS}"
 cp "${SCHEDULE_SOURCE_PATH}" "${RUN_INPUT_SCHEDULE}"
-cp tests/smoke_cosmo/README.md "${RUN_DIR}/README.snapshot.txt"
+if [[ -n "${ANALYSIS_SCHEDULE_SOURCE_PATH}" ]]; then
+  cp "${ANALYSIS_SCHEDULE_SOURCE_PATH}" "${RUN_INPUT_ANALYSIS_SCHEDULE}"
+  ANALYSIS_SCHEDULE_PATH="${RUN_INPUT_ANALYSIS_SCHEDULE}"
+fi
+
+if [[ -f "${RUN_PRESET_DIR}/README.md" ]]; then
+  cp "${RUN_PRESET_DIR}/README.md" "${RUN_DIR}/README.snapshot.txt"
+elif [[ -f tests/smoke_cosmo/README.md ]]; then
+  cp tests/smoke_cosmo/README.md "${RUN_DIR}/README.snapshot.txt"
+fi
 
 cp "${RUN_INPUT_PARAMS}" "${RUN_PARAMS}"
 RUN_OUTDIR_PARAM="${RUN_OUTDIR}"
@@ -541,6 +633,7 @@ RUN_OUTDIR_PARAM="${RUN_OUTDIR_PARAM%/}/"
 RUN_OUTDIR_ESCAPED="$(sed_escape_replacement "${RUN_OUTDIR_PARAM}")"
 RUN_ID_ESCAPED="$(sed_escape_replacement "${RUN_ID}")"
 RUN_INPUT_SCHEDULE_ESCAPED="$(sed_escape_replacement "${RUN_INPUT_SCHEDULE}")"
+RUN_INPUT_ANALYSIS_SCHEDULE_ESCAPED="$(sed_escape_replacement "${RUN_INPUT_ANALYSIS_SCHEDULE}")"
 
 sed -i.bak "s|RUN_OUTDIR|${RUN_OUTDIR_ESCAPED}|g" "${RUN_PARAMS}"
 sed -i.bak "s|__RUN_ID__|${RUN_ID_ESCAPED}|g" "${RUN_PARAMS}"
@@ -555,6 +648,14 @@ if grep -q '^[[:space:]]*scale_outputs_file=' "${RUN_PARAMS}"; then
   sed -i.bak "s|^[[:space:]]*scale_outputs_file=.*$|scale_outputs_file=${RUN_INPUT_SCHEDULE_ESCAPED}|g" "${RUN_PARAMS}"
 else
   printf "\nscale_outputs_file=%s\n" "${RUN_INPUT_SCHEDULE}" >> "${RUN_PARAMS}"
+fi
+
+if [[ -n "${ANALYSIS_SCHEDULE_PATH}" ]]; then
+  if grep -q '^[[:space:]]*analysis_scale_outputs_file=' "${RUN_PARAMS}"; then
+    sed -i.bak "s|^[[:space:]]*analysis_scale_outputs_file=.*$|analysis_scale_outputs_file=${RUN_INPUT_ANALYSIS_SCHEDULE_ESCAPED}|g" "${RUN_PARAMS}"
+  else
+    printf "\nanalysis_scale_outputs_file=%s\n" "${RUN_INPUT_ANALYSIS_SCHEDULE}" >> "${RUN_PARAMS}"
+  fi
 fi
 
 rm -f "${RUN_PARAMS}.bak"
