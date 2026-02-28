@@ -2456,6 +2456,14 @@ void Read_Grid_HDF5_Field_Magnetic(hid_t file_id, Real *dataset_buffer, Header H
                              dataset_buffer, grid_buffer);
 }
 
+/* \brief Return true when an HDF5 dataset/link exists in the file. */
+static bool HDF5_Dataset_Exists(hid_t file_id, const char *dataset_name)
+{
+  if (dataset_name == nullptr) return false;
+  const htri_t exists = H5Lexists(file_id, dataset_name, H5P_DEFAULT);
+  return exists > 0;
+}
+
   #if defined(PRINT_INITIAL_STATS) && defined(COSMOLOGY)
 /*! \fn void Print_Stats(Grid3D &G)
  *  \brief Compute stats for a grid. */
@@ -2744,7 +2752,28 @@ void Grid3D::Read_Grid_HDF5(hid_t file_id, struct Parameters P)
   Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.momentum_z, "/momentum_z");
   Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.Energy, "/Energy");
   #ifdef DE
-  Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.GasEnergy, "/GasEnergy");
+  const bool has_gas_energy_dataset = HDF5_Dataset_Exists(file_id, "/GasEnergy");
+  if (has_gas_energy_dataset) {
+    Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.GasEnergy, "/GasEnergy");
+  } else {
+    const Real density_floor    = Real(1e-30);
+    const Real gas_energy_floor = Real(1e-30);
+    for (k = 0; k < H.nz_real; k++) {
+      for (j = 0; j < H.ny_real; j++) {
+        for (i = 0; i < H.nx_real; i++) {
+          id = (i + H.n_ghost) + (j + H.n_ghost) * H.nx + (k + H.n_ghost) * H.nx * H.ny;
+          const Real density = std::max(C.density[id], density_floor);
+          const Real kinetic =
+              Real(0.5) * (C.momentum_x[id] * C.momentum_x[id] + C.momentum_y[id] * C.momentum_y[id] +
+                           C.momentum_z[id] * C.momentum_z[id]) /
+              density;
+          const Real internal = C.Energy[id] - kinetic;
+          C.GasEnergy[id]     = std::max(internal, gas_energy_floor);
+        }
+      }
+    }
+    chprintf("IC ingest: '/GasEnergy' missing. Initialized GasEnergy from Energy and momentum.\n");
+  }
   #endif
 
   #ifdef SCALAR
@@ -2758,9 +2787,23 @@ void Grid3D::Read_Grid_HDF5(hid_t file_id, struct Parameters P)
     #endif  // DUST
 
     #if defined(COOLING_GRACKLE) || defined(CHEMISTRY_GPU)
-      #ifdef COSMOLOGY
-  if (P.nfile > 0) {
-      #endif  // COSMOLOGY
+  const bool has_HI_density    = HDF5_Dataset_Exists(file_id, "/HI_density");
+  const bool has_HII_density   = HDF5_Dataset_Exists(file_id, "/HII_density");
+  const bool has_HeI_density   = HDF5_Dataset_Exists(file_id, "/HeI_density");
+  const bool has_HeII_density  = HDF5_Dataset_Exists(file_id, "/HeII_density");
+  const bool has_HeIII_density = HDF5_Dataset_Exists(file_id, "/HeIII_density");
+  const bool has_e_density     = HDF5_Dataset_Exists(file_id, "/e_density");
+      #ifdef GRACKLE_METALS
+  const bool has_metal_density = HDF5_Dataset_Exists(file_id, "/metal_density");
+      #endif  // GRACKLE_METALS
+
+  bool has_chemistry_datasets =
+      has_HI_density && has_HII_density && has_HeI_density && has_HeII_density && has_HeIII_density && has_e_density;
+      #ifdef GRACKLE_METALS
+  has_chemistry_datasets = has_chemistry_datasets && has_metal_density;
+      #endif  // GRACKLE_METALS
+
+  if (has_chemistry_datasets) {
     Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.HI_density, "/HI_density");
     Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.HII_density, "/HII_density");
     Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.HeI_density, "/HeI_density");
@@ -2770,25 +2813,46 @@ void Grid3D::Read_Grid_HDF5(hid_t file_id, struct Parameters P)
       #ifdef GRACKLE_METALS
     Read_Grid_HDF5_Field(file_id, dataset_buffer, H, C.metal_density, "/metal_density");
       #endif  // GRACKLE_METALS
-      #ifdef COSMOLOGY
   } else {
-    // Initialize the density field
+    const Real XH  = Real(0.76);
+    const Real YHe = Real(0.24);
     for (k = 0; k < H.nz_real; k++) {
       for (j = 0; j < H.ny_real; j++) {
         for (i = 0; i < H.nx_real; i++) {
           id                  = (i + H.n_ghost) + (j + H.n_ghost) * H.nx + (k + H.n_ghost) * H.nx * H.ny;
-          buf_id              = k + j * (H.nz_real) + i * (H.nz_real) * (H.ny_real);
-          C.HI_density[id]    = INITIAL_FRACTION_HI * C.density[id];
-          C.HII_density[id]   = INITIAL_FRACTION_HII * C.density[id];
-          C.HeI_density[id]   = INITIAL_FRACTION_HEI * C.density[id];
-          C.HeII_density[id]  = INITIAL_FRACTION_HEII * C.density[id];
-          C.HeIII_density[id] = INITIAL_FRACTION_HEIII * C.density[id];
-          C.e_density[id]     = INITIAL_FRACTION_ELECTRON * C.density[id];
+          C.HI_density[id]    = XH * C.density[id];
+          C.HII_density[id]   = Real(0.0);
+          C.HeI_density[id]   = YHe * C.density[id];
+          C.HeII_density[id]  = Real(0.0);
+          C.HeIII_density[id] = Real(0.0);
+          C.e_density[id]     = Real(0.0);
+          #ifdef GRACKLE_METALS
+          C.metal_density[id] = Real(0.0);
+          #endif  // GRACKLE_METALS
         }
       }
     }
+
+    std::string missing_fields;
+    auto append_missing = [&](bool present, const char *name) {
+      if (!present) {
+        if (!missing_fields.empty()) missing_fields += ", ";
+        missing_fields += name;
+      }
+    };
+    append_missing(has_HI_density, "/HI_density");
+    append_missing(has_HII_density, "/HII_density");
+    append_missing(has_HeI_density, "/HeI_density");
+    append_missing(has_HeII_density, "/HeII_density");
+    append_missing(has_HeIII_density, "/HeIII_density");
+    append_missing(has_e_density, "/e_density");
+      #ifdef GRACKLE_METALS
+    append_missing(has_metal_density, "/metal_density");
+      #endif  // GRACKLE_METALS
+    chprintf(
+        "IC ingest: missing chemistry dataset(s): %s. Initialized neutral primordial chemistry fields from density.\n",
+        missing_fields.c_str());
   }
-      #endif  // COSMOLOGY
     #endif    // COOLING_GRACKLE , CHEMISTRY_GPU
   #endif      // SCALAR
 
