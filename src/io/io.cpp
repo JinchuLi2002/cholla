@@ -2816,16 +2816,21 @@ void Grid3D::Read_Grid_HDF5(hid_t file_id, struct Parameters P)
   } else {
     const Real XH  = Real(0.76);
     const Real YHe = Real(0.24);
+    const Real x_e       = Real(1e-4);
+    const Real rho_floor = Real(1e-30);
     for (k = 0; k < H.nz_real; k++) {
       for (j = 0; j < H.ny_real; j++) {
         for (i = 0; i < H.nx_real; i++) {
           id                  = (i + H.n_ghost) + (j + H.n_ghost) * H.nx + (k + H.n_ghost) * H.nx * H.ny;
-          C.HI_density[id]    = XH * C.density[id];
-          C.HII_density[id]   = Real(0.0);
-          C.HeI_density[id]   = YHe * C.density[id];
+          const Real rho              = std::max(C.density[id], rho_floor);
+          const Real hydrogen_density = XH * rho;
+          const Real helium_density   = YHe * rho;
+          C.HII_density[id]   = x_e * hydrogen_density;
+          C.HI_density[id]    = hydrogen_density - C.HII_density[id];
+          C.HeI_density[id]   = helium_density;
           C.HeII_density[id]  = Real(0.0);
           C.HeIII_density[id] = Real(0.0);
-          C.e_density[id]     = Real(0.0);
+          C.e_density[id]     = C.HII_density[id];
           #ifdef GRACKLE_METALS
           C.metal_density[id] = Real(0.0);
           #endif  // GRACKLE_METALS
@@ -2850,8 +2855,9 @@ void Grid3D::Read_Grid_HDF5(hid_t file_id, struct Parameters P)
     append_missing(has_metal_density, "/metal_density");
       #endif  // GRACKLE_METALS
     chprintf(
-        "IC ingest: missing chemistry dataset(s): %s. Initialized neutral primordial chemistry fields from density.\n",
-        missing_fields.c_str());
+        "IC ingest: missing chemistry dataset(s): %s. Initialized primordial chemistry fields from density with "
+        "x_e=%g.\n",
+        missing_fields.c_str(), x_e);
   }
     #endif    // COOLING_GRACKLE , CHEMISTRY_GPU
   #endif      // SCALAR
