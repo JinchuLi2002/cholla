@@ -1,0 +1,61 @@
+# Debug CHIPS-style single-model cosmology + LyA analysis preset.
+# Uses built-in ICs (no external IC file dependency).
+
+# Grid
+# 256^3 keeps the CHIPS debug preset within Colab GPU memory while preserving
+# end-to-end analysis wiring.
+nx=256
+ny=256
+nz=256
+
+# Runtime controls
+tout=100000.0
+outstep=100000.0
+n_steps_output=0
+
+# Hydro / IC
+gamma=1.66666667
+init=Read_Grid
+nfile=0
+
+# Cosmology
+Init_redshift=100.0
+H0=67.66
+Omega_M=0.3111
+Omega_L=0.6889
+Omega_b=0.0486
+scale_outputs_file=tests/chips_single_model/scale_outputs.txt
+
+# Required for CHEMISTRY_GPU builds
+UVB_rates_file=src/chemistry_gpu/uvb_rates_V21.txt
+
+# Domain (50 Mpc/h style box in existing Cholla cosmology examples)
+xmin=0.0
+ymin=0.0
+zmin=0.0
+xlen=50000.0
+ylen=50000.0
+zlen=50000.0
+
+# Periodic boundaries
+xl_bcnd=1
+xu_bcnd=1
+yl_bcnd=1
+yu_bcnd=1
+zl_bcnd=1
+zu_bcnd=1
+
+# Output directories (RUN_OUTDIR token is resolved by scripts/colab_smoke.sh)
+outdir=RUN_OUTDIR
+analysisdir=RUN_OUTDIR/analysis/
+skewersdir=RUN_OUTDIR/skewers/
+
+# Analysis schedule + LyA controls
+analysis_scale_outputs_file=tests/chips_single_model/analysis_scale_outputs.txt
+lya_skewers_stride=16
+lya_Pk_d_log_k=0.1
+
+# Single-rank MPI grid when SET_MPI_GRID is enabled
+n_proc_x=1
+n_proc_y=1
+n_proc_z=1

@@ -5,7 +5,7 @@
 # 256^3 keeps the CHIPS debug preset within Colab GPU memory while preserving
 # end-to-end analysis wiring.
 nx=256
-ny=266
+ny=256
 nz=256
 
 # Runtime controls
