@@ -1,6 +1,8 @@
 # Debug CHIPS-style single-model cosmology + LyA analysis preset.
 # Uses built-in ICs (no external IC file dependency).
 
+indir=RUN_ICDIR
+
 # Grid
 # 256^3 keeps the CHIPS debug preset within Colab GPU memory while preserving
 # end-to-end analysis wiring.
