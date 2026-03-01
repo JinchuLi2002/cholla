@@ -26,7 +26,7 @@ H0=67.66
 Omega_M=0.3111
 Omega_L=0.6889
 Omega_b=0.0486
-scale_outputs_file=tests/chips_single_model/scale_outputs.txt
+scale_outputs_file=tests/chips_single_model_music/scale_outputs.txt
 
 # Required for CHEMISTRY_GPU builds
 UVB_rates_file=src/chemistry_gpu/uvb_rates_V21.txt
@@ -53,7 +53,7 @@ analysisdir=RUN_OUTDIR/analysis/
 skewersdir=RUN_OUTDIR/skewers/
 
 # Analysis schedule + LyA controls
-analysis_scale_outputs_file=tests/chips_single_model/analysis_scale_outputs.txt
+analysis_scale_outputs_file=tests/chips_single_model_music/analysis_scale_outputs.txt
 lya_skewers_stride=16
 lya_Pk_d_log_k=0.1
 
